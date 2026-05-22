@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}出错了{% endblock %}
+
+{% block content %}
+<div class="empty-state">
+    <div class="icon">&#9888;&#65039;</div>
+    <p style="color:var(--accent);">{{ message }}</p>
+    <a href="/" class="btn btn-primary" style="margin-top:1.5rem;">返回首页</a>
+</div>
+{% endblock %}

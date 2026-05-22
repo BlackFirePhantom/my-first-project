@@ -1,0 +1,10 @@
+﻿.venv\Scripts\python : Traceback (most recent call last):
+所在位置 行:1 字符: 1
++ .venv\Scripts\python scratch\test_get_content_fix.py 2>&1 | Out-File  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\blackfire\Documents\PythonProject\scratch\test_get_content_fix.py", line 12, in <module>
+    from novel_sources import cache
+ModuleNotFoundError: No module named 'novel_sources'

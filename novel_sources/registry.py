@@ -1,0 +1,55 @@
+"""
+书源注册中心 — 自动发现 novel_sources/ 下的所有书源
+"""
+
+import importlib
+import pkgutil
+from pathlib import Path
+
+# 源名 -> 模块对象
+_sources: dict = {}
+# 有序的源列表 [(id, display_name), ...]
+_source_list: list = []
+
+
+def _discover():
+    """扫描 novel_sources 包，加载所有包含 search/get_chapters/get_content 的模块"""
+    if _sources:
+        return
+
+    package_dir = Path(__file__).parent
+    package_name = __package__
+
+    for finder, module_name, is_pkg in pkgutil.iter_modules([str(package_dir)]):
+        if module_name.startswith("_") or module_name in ("registry", "base"):
+            continue
+        try:
+            mod = importlib.import_module(f"{package_name}.{module_name}")
+        except Exception:
+            continue
+
+        # 检查是否实现了必要接口
+        if all(hasattr(mod, fn) for fn in ("search", "get_chapters", "get_content")):
+            display_name = getattr(mod, "NAME", module_name)
+            _sources[module_name] = mod
+            _source_list.append((module_name, display_name))
+
+
+def get_all() -> list[tuple[str, str]]:
+    """返回所有可用源 [(id, display_name), ...]"""
+    _discover()
+    return list(_source_list)
+
+
+def get(source_id: str):
+    """根据 id 获取源模块"""
+    _discover()
+    return _sources.get(source_id)
+
+
+def get_default():
+    """获取默认源（第一个）"""
+    _discover()
+    if _source_list:
+        return _sources[_source_list[0][0]]
+    return None

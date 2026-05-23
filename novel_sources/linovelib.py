@@ -161,7 +161,7 @@ def search(keyword: str) -> list[dict]:
             
             # 使用 og 标签提取，最准确且不受改版影响
             title_meta = soup.find("meta", property="og:title")
-            author_meta = soup.find("meta", property="og:novel:author") or soup.find("meta", name="author")
+            author_meta = soup.find("meta", property="og:novel:author") or soup.find("meta", attrs={"name": "author"})
             
             novel_name = title_meta["content"] if title_meta else None
             if not novel_name:

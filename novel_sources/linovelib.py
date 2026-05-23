@@ -252,8 +252,39 @@ def _make_catalog_candidates(novel_url: str) -> list[tuple[str, dict]]:
     return candidates
 
 
+def _fetch_catalog_html(url: str, headers: dict) -> str:
+    """
+    尝试用 curl_cffi 获取目录 HTML（模拟 Chrome TLS 指纹绕过 Cloudflare）。
+    失败时回退到 Playwright。
+    """
+    # ── 方法一：curl_cffi（模拟真实 Chrome TLS 指纹）────────────────
+    try:
+        from curl_cffi import requests as cf_requests
+        print(f"[linovelib] curl_cffi 请求: {url}")
+        resp = cf_requests.get(url, headers=headers, impersonate="chrome124", timeout=20)
+        print(f"[linovelib] curl_cffi 状态码: {resp.status_code}, 长度: {len(resp.text)}")
+        if resp.status_code == 200 and not _is_cf_blocked(resp.text):
+            return resp.text
+        print(f"[linovelib] curl_cffi 失败 (状态码={resp.status_code} 或 CF 拦截)")
+    except ImportError:
+        print("[linovelib] curl_cffi 未安装，跳过")
+    except Exception as e:
+        print(f"[linovelib] curl_cffi 异常: {e}")
+
+    # ── 方法二：Playwright（无头浏览器）───────────────────────────────
+    print(f"[linovelib] 使用 Playwright 重试: {url}")
+    candidate_html = fetch_html(url)
+    import re as _re
+    title_match = _re.search(r'<title>([^<]+)</title>', candidate_html)
+    page_title = title_match.group(1).strip() if title_match else "无"
+    print(f"[linovelib] Playwright 页面标题: {page_title}, 长度: {len(candidate_html)}")
+    if _is_cf_blocked(candidate_html):
+        raise Exception(f"Playwright CF block (title={page_title})")
+    return candidate_html
+
+
 def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
-    """获取小说所有章节目录（自动尝试多个镜像，绕过 Cloudflare）"""
+    """获取小说所有章节目录（curl_cffi TLS 指纹 + 多镜像 + Playwright 三重绕过）"""
     if not force_refresh:
         cached = cache.get_chapters(novel_url)
         if cached:  # 只有非空缓存才使用，空列表视为无效缓存
@@ -266,36 +297,13 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
 
     for try_url, try_headers in candidates:
         print(f"[linovelib] 尝试获取目录: {try_url}")
-        # ── Step 1: requests ──────────────────────────────────────
         try:
-            resp = robust_get(try_url, headers=try_headers, timeout=15)
-            print(f"[linovelib] requests 状态码: {resp.status_code}, 长度: {len(resp.text)}")
-            if resp.status_code == 200 and not _is_cf_blocked(resp.text):
-                html = resp.text
-                used_url = try_url
-                break
-            last_error = f"requests failed ({resp.status_code} or CF block)"
+            html = _fetch_catalog_html(try_url, try_headers)
+            used_url = try_url
+            break
         except Exception as e:
             last_error = str(e)
-            print(f"[linovelib] requests 异常: {e}")
-
-        # ── Step 2: Playwright fallback ───────────────────────────
-        print(f"[linovelib] 使用 Playwright 重试: {try_url}")
-        try:
-            candidate_html = fetch_html(try_url)
-            import re as _re
-            title_match = _re.search(r'<title>([^<]+)</title>', candidate_html)
-            page_title = title_match.group(1).strip() if title_match else "无"
-            print(f"[linovelib] Playwright 页面标题: {page_title}, 长度: {len(candidate_html)}")
-            if not _is_cf_blocked(candidate_html):
-                html = candidate_html
-                used_url = try_url
-                break
-            print(f"[linovelib] Playwright 仍被 CF 拦截 ({try_url})，尝试下一个镜像...")
-            last_error = f"Playwright CF block on {try_url}"
-        except Exception as pe:
-            last_error = str(pe)
-            print(f"[linovelib] Playwright 异常: {pe}")
+            print(f"[linovelib] {try_url} 全部方法失败: {e}，尝试下一个镜像...")
 
     if not html:
         raise Exception(f"所有镜像均无法获取目录，请稍后重试。最后错误: {last_error}")

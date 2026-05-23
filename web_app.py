@@ -172,6 +172,9 @@ def novel_detail(novel_url):
                 resp = http_requests.get(full_url, headers=source.HEADERS, timeout=15)
                 if resp.status_code == 200:
                     resp.encoding = "utf-8"
+                    # 检查是否为 Cloudflare 等人机挑战页面
+                    if any(k in resp.text for k in ("Just a moment", "Checking your browser", "安全检查", "ddos-guard")):
+                        raise Exception("Detected Cloudflare/DDOS protection page")
                     html = resp.text
                 elif hasattr(source, "fetch_html"):
                     print(f"[web_app] requests detail status {resp.status_code}. Falling back to Playwright...")

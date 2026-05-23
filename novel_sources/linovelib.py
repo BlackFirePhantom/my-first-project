@@ -152,6 +152,9 @@ def search(keyword: str) -> list[dict]:
                 resp = robust_get(target_url, headers=HEADERS, timeout=15)
                 if resp.status_code != 200:
                     raise Exception(f"HTTP status code {resp.status_code}")
+                # 检查是否为 Cloudflare 等人机挑战页面
+                if any(k in resp.text for k in ("Just a moment", "Checking your browser", "安全检查", "ddos-guard")):
+                    raise Exception("Detected Cloudflare/DDOS protection page")
                 html = resp.text
             except Exception as e:
                 print(f"[linovelib] requests get detail failed: {e}. Falling back to Playwright...")
@@ -220,6 +223,9 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
         resp = robust_get(catalog_url, headers=HEADERS, timeout=15)
         if resp.status_code != 200:
             raise Exception(f"HTTP status code {resp.status_code}")
+        # 检查是否为 Cloudflare 等人机挑战页面
+        if any(k in resp.text for k in ("Just a moment", "Checking your browser", "安全检查", "ddos-guard")):
+            raise Exception("Detected Cloudflare/DDOS protection page")
         html = resp.text
     except Exception as e:
         print(f"[linovelib] requests get catalog failed: {e}. Falling back to Playwright...")

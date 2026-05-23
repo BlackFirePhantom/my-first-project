@@ -372,7 +372,9 @@ def api_delete_bookshelf(url):
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     print("\n  小说阅读器已启动")
     print(f"  浏览器打开: http://localhost:{port}\n")
-    app.run(host="0.0.0.0", port=port, debug=True)
+    print(f"  Debug 模式: {'开启' if debug else '关闭（生产模式）'}\n")
+    app.run(host="0.0.0.0", port=port, debug=debug)
 

@@ -3,4 +3,4 @@ beautifulsoup4
 lxml
 flask
 playwright
-curl_cffi
+

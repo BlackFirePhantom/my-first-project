@@ -59,26 +59,69 @@ def _worker():
             page = context.new_page()
             try:
                 page.goto(url, timeout=30000)
-                # 等待正文元素渲染完成
-                page.wait_for_function(
-                    "() => { "
-                    "  const el = document.querySelector('div#mlfy_main_text'); "
-                    "  if (!el || !el.innerText) return false; "
-                    "  const text = el.innerText; "
-                    "  return !text.includes('內容加載失敗') && "
-                    "         !text.includes('内容加载失败') && "
-                    "         !text.includes('数据缺失') && "
-                    "         !text.includes('正在加载'); "
-                    "}",
-                    timeout=15000
-                )
+                # 等待正文元素渲染并加载，并且等待混淆 JS 的样式表规则被注入（超时则回退继续）
+                try:
+                    page.wait_for_function(
+                        """() => {
+                            const el = document.querySelector('div#mlfy_main_text');
+                            if (!el || !el.innerText) return false;
+                            const text = el.innerText;
+                            if (text.includes('内容加载失败') || text.includes('內容加載失敗') || text.includes('数据缺失') || text.includes('正在加载')) {
+                                return false;
+                            }
+                            // 检查混淆脚本是否已将 display: none 样式规则注入
+                            for (let i = 0; i < document.styleSheets.length; i++) {
+                                try {
+                                    const sheet = document.styleSheets[i];
+                                    const rules = sheet.cssRules || sheet.rules;
+                                    if (!rules) continue;
+                                    for (let j = 0; j < rules.length; j++) {
+                                        const rule = rules[j];
+                                        if (rule.cssText && rule.cssText.includes('display: none') && 
+                                            rule.selectorText && rule.selectorText.includes('TextContent')) {
+                                            return true;
+                                        }
+                                    }
+                                } catch (e) {}
+                            }
+                            return false;
+                        }""",
+                        timeout=8000
+                    )
+                except Exception as e:
+                    print(f"[Worker] Wait for style rules timeout or error (might have no scramble): {e}")
+
                 if mode == "chapter":
-                    # 直接在浏览器 JS 环境中提取数据，避免拿到被混淆 JS 修改的序列化 HTML
+                    # 直接在浏览器中移除 rt(拼音) 和 .dag(干扰项)，过滤掉 display:none 的混淆克隆段落
                     data = page.evaluate("""
                         () => {
-                            // 获取 #TextContent 的 innerHTML（JS 执行前的原始内容）
                             const container = document.querySelector('#TextContent');
-                            const innerHtml = container ? container.innerHTML : '';
+                            if (!container) return { paragraphs: [], nextPage: null };
+
+                            // 移除注音和无用干扰标签
+                            const rtTags = container.querySelectorAll('rt');
+                            rtTags.forEach(rt => rt.remove());
+                            const dagTags = container.querySelectorAll('.dag');
+                            dagTags.forEach(dag => dag.remove());
+
+                            const pTags = Array.from(container.querySelectorAll('p'));
+                            const paragraphs = [];
+                            if (pTags.length > 0) {
+                                pTags.forEach(p => {
+                                    const style = window.getComputedStyle(p);
+                                    if (style.display !== 'none') {
+                                        const text = p.innerText.trim();
+                                        if (text) {
+                                            paragraphs.push(text);
+                                        }
+                                    }
+                                });
+                            } else {
+                                const text = container.innerText.trim();
+                                if (text) {
+                                    paragraphs.push(...text.split('\\n').map(s => s.trim()).filter(s => s));
+                                }
+                            }
 
                             // 获取"下一页"链接
                             let nextPage = null;
@@ -90,7 +133,7 @@ def _worker():
                                     break;
                                 }
                             }
-                            return { innerHtml, nextPage };
+                            return { paragraphs, nextPage };
                         }
                     """)
                     result_box["chapter_data"] = data
@@ -139,9 +182,8 @@ def _fetch_with_playwright(url: str) -> str:
 def _fetch_chapter_data(url: str) -> dict:
     """
     在 Playwright 浏览器中直接通过 JS evaluate() 提取章节数据。
-    直接获取 #TextContent 的 innerHTML 和下一页链接，
-    完全避免 page.content() 返回被混淆 JS 修改的序列化 DOM。
-    返回: {"innerHtml": str, "nextPage": str or None}
+    直接获取可见的段落文本和下一页链接，完美排除混淆段落和注音。
+    返回: {"paragraphs": list[str], "nextPage": str or None}
     """
     _ensure_worker()
     result_box = {"_mode": "chapter"}
@@ -152,7 +194,7 @@ def _fetch_chapter_data(url: str) -> dict:
         time.sleep(0.1)
     if "error" in result_box:
         raise result_box["error"]
-    return result_box.get("chapter_data", {"innerHtml": "", "nextPage": None})
+    return result_box.get("chapter_data", {"paragraphs": [], "nextPage": None})
 
 
 # ── 书源基础功能接口 ──────────────────────────────────
@@ -322,35 +364,13 @@ def get_content(chapter_url: str) -> str:
     base_chapter_id = basename.split("_")[0]
     
     for _ in range(max_pages):
-        # 使用新的 chapter 模式：在浏览器 JS 中直接获取 innerHTML 和 nextPage
+        # 使用新的 chapter 模式：在浏览器 JS 中直接获取过滤后的可见段落和 nextPage
         data = _fetch_chapter_data(page_url)
-        inner_html = data.get("innerHtml", "")
+        page_paragraphs = data.get("paragraphs", [])
         next_page_raw = data.get("nextPage", None)
         
-        if not inner_html:
+        if not page_paragraphs:
             break
-            
-        # 用 BeautifulSoup 解析纯净的 #TextContent innerHTML
-        soup = BeautifulSoup(inner_html, "lxml")
-        
-        # 清理无用标签与注音/拼音
-        for el in soup.select("script, .dag"):
-            el.decompose()
-        for rt in soup.select("rt"):
-            rt.decompose()
-            
-        # 提取段落（innerHTML 中段落已是正确顺序，无混淆克隆）
-        p_tags = soup.find_all("p")
-        page_paragraphs = []
-        if p_tags:
-            for p in p_tags:
-                txt = p.get_text(strip=True)
-                if txt:
-                    page_paragraphs.append(txt)
-        else:
-            txt = soup.get_text("\n", strip=True)
-            if txt:
-                page_paragraphs = [line.strip() for line in txt.split("\n") if line.strip()]
         
         # 处理跨页重叠：某些网站会在下一页开头重复上一页末尾的段落
         # 用"尾部滑动窗口"检测：如果新页前 N 段与当前末尾 N 段完全匹配，就跳过这段重叠

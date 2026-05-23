@@ -165,8 +165,8 @@ def _ensure_worker():
     _ready.wait(timeout=30)
 
 
-def _fetch_with_playwright(url: str) -> str:
-    """获取整页 HTML（保留用于需要完整页面的场合）"""
+def fetch_html(url: str) -> str:
+    """获取整页 HTML（使用 Playwright 绕过 Cloudflare）"""
     _ensure_worker()
     result_box = {"_mode": "html"}
     _task_queue.put((url, result_box))
@@ -230,11 +230,16 @@ def search(keyword: str) -> list[dict]:
     if target_url:
         # 获取小说元数据
         try:
-            resp = robust_get(target_url, headers=HEADERS, timeout=15)
-            if resp.status_code != 200:
-                raise Exception(f"请求失败，状态码: {resp.status_code}")
+            try:
+                resp = robust_get(target_url, headers=HEADERS, timeout=15)
+                if resp.status_code != 200:
+                    raise Exception(f"HTTP status code {resp.status_code}")
+                html = resp.text
+            except Exception as e:
+                print(f"[linovelib] requests get detail failed: {e}. Falling back to Playwright...")
+                html = fetch_html(target_url)
             
-            soup = BeautifulSoup(resp.text, "lxml")
+            soup = BeautifulSoup(html, "lxml")
             
             # 使用 og 标签提取，最准确且不受改版影响
             title_meta = soup.find("meta", property="og:title")
@@ -293,11 +298,19 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
         catalog_url = novel_url.rstrip("/") + "/catalog"
         
     # 获取目录 HTML
-    resp = robust_get(catalog_url, headers=HEADERS, timeout=15)
-    if resp.status_code != 200:
-        raise Exception(f"获取目录失败，状态码: {resp.status_code}")
+    try:
+        resp = robust_get(catalog_url, headers=HEADERS, timeout=15)
+        if resp.status_code != 200:
+            raise Exception(f"HTTP status code {resp.status_code}")
+        html = resp.text
+    except Exception as e:
+        print(f"[linovelib] requests get catalog failed: {e}. Falling back to Playwright...")
+        try:
+            html = fetch_html(catalog_url)
+        except Exception as pe:
+            raise Exception(f"获取目录失败。Requests 错误: {e}; Playwright 错误: {pe}")
         
-    soup = BeautifulSoup(resp.text, "lxml")
+    soup = BeautifulSoup(html, "lxml")
     
     # 提取小说名称，以便用于去除卷标题中的小说名
     novel_name_meta = soup.find("meta", property="og:novel:book_name")

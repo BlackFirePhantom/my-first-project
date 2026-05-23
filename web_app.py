@@ -167,9 +167,26 @@ def novel_detail(novel_url):
     if not novel_name or force_refresh or not cover_url:
         novel_name = "未知小说"
         try:
-            resp = http_requests.get(full_url, headers=source.HEADERS, timeout=15)
-            resp.encoding = "utf-8"
-            soup = BeautifulSoup(resp.text, "lxml")
+            html = ""
+            try:
+                resp = http_requests.get(full_url, headers=source.HEADERS, timeout=15)
+                if resp.status_code == 200:
+                    resp.encoding = "utf-8"
+                    html = resp.text
+                elif hasattr(source, "fetch_html"):
+                    print(f"[web_app] requests detail status {resp.status_code}. Falling back to Playwright...")
+                    html = source.fetch_html(full_url)
+            except Exception as e:
+                if hasattr(source, "fetch_html"):
+                    print(f"[web_app] requests detail failed: {e}. Falling back to Playwright...")
+                    html = source.fetch_html(full_url)
+                else:
+                    raise e
+            
+            if not html:
+                raise Exception("无法获取页面内容")
+
+            soup = BeautifulSoup(html, "lxml")
             title_tag = soup.select_one("h1#name, div#info h1, div.info h1, div.book-info h1, h1")
             novel_name = title_tag.get_text(strip=True) if title_tag else "未知小说"
             if len(novel_name) < 3 or novel_name in ("笔趣阁", "首页"):

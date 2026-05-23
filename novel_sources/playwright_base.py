@@ -67,10 +67,24 @@ class PlaywrightPool:
         loop.run_forever()
 
     async def _async_init(self):
+        import os
         from playwright.async_api import async_playwright
         pw = await async_playwright().start()
+
+        # 自动判定无头模式：
+        # 1. 优先读取环境变量 PLAYWRIGHT_HEADLESS (如 "true", "false")
+        # 2. 如果是 Linux 且无图形界面 ($DISPLAY 未设置)，强制设为 True，防止启动失败
+        headless_env = os.environ.get("PLAYWRIGHT_HEADLESS")
+        if headless_env is not None:
+            headless = headless_env.lower() in ("1", "true", "yes")
+        else:
+            if os.name != "nt" and not os.environ.get("DISPLAY"):
+                headless = True
+            else:
+                headless = self._headless
+
         self._browser = await pw.chromium.launch(
-            headless=self._headless,
+            headless=headless,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--window-position=-32000,-32000",

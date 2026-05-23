@@ -230,8 +230,10 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
         catalog_url = novel_url.rstrip("/") + "/catalog"
         
     # 获取目录 HTML
+    print(f"[linovelib] 正在获取目录: {catalog_url}")
     try:
         resp = robust_get(catalog_url, headers=HEADERS, timeout=15)
+        print(f"[linovelib] requests 状态码: {resp.status_code}, 内容长度: {len(resp.text)}")
         if resp.status_code != 200:
             raise Exception(f"HTTP status code {resp.status_code}")
         # 检查是否为 Cloudflare 等人机挑战页面
@@ -242,6 +244,11 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
         print(f"[linovelib] requests get catalog failed: {e}. Falling back to Playwright...")
         try:
             html = fetch_html(catalog_url)
+            print(f"[linovelib] Playwright 获取成功, 内容长度: {len(html)}")
+            # 检查 Playwright 返回的 title
+            import re as _re
+            title_match = _re.search(r'<title>([^<]+)</title>', html)
+            print(f"[linovelib] Playwright 页面标题: {title_match.group(1) if title_match else '无法提取'}")
         except Exception as pe:
             raise Exception(f"获取目录失败。Requests 错误: {e}; Playwright 错误: {pe}")
         
@@ -255,6 +262,7 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
     
     # 遍历每个卷 volume 容器
     volumes = soup.select(".volume-list > .volume")
+    print(f"[linovelib] 找到 {len(volumes)} 个卷，soup.title={soup.title.get_text() if soup.title else '无'}")
     if not volumes:
         # Fallback: 如果没有 .volume 结构，直接找所有的 a
         seen = set()

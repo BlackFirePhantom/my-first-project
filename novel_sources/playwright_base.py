@@ -38,7 +38,7 @@ class PlaywrightPool:
     调用方无需关心异步/线程，所有方法以同步阻塞方式返回结果。
     """
 
-    def __init__(self, max_concurrent: int = 3, headless: bool = False):
+    def __init__(self, max_concurrent: int = 3, headless: bool = True):
         self._max_concurrent = max_concurrent
         self._headless = headless
         self._loop = None
@@ -57,8 +57,13 @@ class PlaywrightPool:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
-        loop.run_until_complete(self._async_init())
-        self._ready.set()
+        try:
+            loop.run_until_complete(self._async_init())
+        except Exception as e:
+            print(f"[PlaywrightPool] 初始化失败: {e}")
+            self._init_error = e
+        finally:
+            self._ready.set()  # 无论成功失败都要释放，避免调用方永久阻塞
         loop.run_forever()
 
     async def _async_init(self):

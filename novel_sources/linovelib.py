@@ -218,7 +218,7 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
     """获取小说所有章节目录"""
     if not force_refresh:
         cached = cache.get_chapters(novel_url)
-        if cached:
+        if cached:  # 只有非空缓存才使用，空列表视为无效缓存
             return cached
             
     # 构造目录 URL
@@ -301,7 +301,10 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
                         "url": full_url
                     })
                     
-    cache.set_chapters(novel_url, chapters)
+    if chapters:  # 只缓存非空的目录，避免把爬取失败的空结果写入缓存
+        cache.set_chapters(novel_url, chapters)
+    else:
+        print(f"[linovelib] 警告: 获取到空章节列表，不写入缓存，下次将重新获取")
     return chapters
 
 

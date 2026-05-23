@@ -19,6 +19,17 @@ HEADERS = {
     "Referer": BASE_URL,
 }
 
+# Cloudflare 等待条件
+_CF_WAIT_FN = r"""
+() => {
+    const t = document.title;
+    if (t.includes('Just a moment') || t.includes('Checking your browser') || t.includes('Attention Required')) {
+        return false;
+    }
+    return document.body && document.body.innerText.length > 100;
+}
+"""
+
 # ── Playwright JS 常量 ────────────────────────────────
 # 等待函数：检测混淆样式表是否已将 display:none / scale(0) / absolute 注入
 _WAIT_FN = r"""
@@ -99,7 +110,7 @@ _CHAPTER_JS = r"""
 def fetch_html(url: str) -> str:
     """获取整页 HTML（使用共享 Playwright 池绕过 Cloudflare）"""
     from novel_sources import playwright_base
-    return playwright_base.get_pool().fetch_html(url)
+    return playwright_base.get_pool().fetch_html(url, wait_fn=_CF_WAIT_FN, wait_timeout=15000)
 
 
 def _fetch_chapter_data(url: str) -> dict:

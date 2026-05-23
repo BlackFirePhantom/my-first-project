@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / IDE settings
+.idea/
+.vscode/
+
+# Logs
+*.log
+pip-log.txt
+
+# Project specific caches and database
+/cache/
+/bookshelf.json
+
+# Root HTML files (test output files)
+/*.html

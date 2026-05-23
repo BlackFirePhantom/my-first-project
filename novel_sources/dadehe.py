@@ -1,13 +1,11 @@
 """
 腐书网小说源 (www.dadehe.com)
 Playwright 绕过 Cloudflare，cookie 缓存 + 文件级正文/目录缓存
+使用全局共享 Playwright 池（playwright_base），避免独立 browser 实例浪费内存。
 """
 
 import re
-import atexit
-import time
 import threading
-from queue import Queue
 from urllib.parse import urljoin
 
 import requests
@@ -28,105 +26,35 @@ _mem_content = {}
 _mem_lock = threading.Lock()
 PREFETCH_COUNT = 3
 
-# ── Playwright 专用线程 ────────────────────────────────
-_worker_thread = None
-_task_queue = Queue()
-_ready = threading.Event()
-
-
-def _worker():
-    from playwright.sync_api import sync_playwright
-
-    pw = sync_playwright().start()
-    browser = pw.chromium.launch(
-        headless=False,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--window-position=-32000,-32000",
-            "--window-size=10,10"
-        ],
-    )
-    context = browser.new_context(
-        user_agent=HEADERS["User-Agent"],
-        viewport={"width": 1920, "height": 1080},
-    )
-    context.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
-    _ready.set()
-
-    while True:
-        task = _task_queue.get()
-        if task is None:
-            break
-        url, result_box = task
-        try:
-            page = context.new_page()
-            try:
-                page.goto(url, timeout=30000)
-                for _ in range(30):
-                    if "Just a moment" not in page.title():
-                        break
-                    time.sleep(0.5)
-                else:
-                    time.sleep(3)
-
-                html = page.content()
-
-                # 提取并持久化 Cloudflare cookie
-                cookies = context.cookies()
-                cf_dict = {}
-                for c in cookies:
-                    if c.get("name") in ("cf_clearance", "__cf_bm", "is_human"):
-                        cf_dict[c["name"]] = c["value"]
-                if cf_dict:
-                    cache.set_meta("dadehe_cf_cookies", cf_dict, ttl=3600)
-
-                result_box["html"] = html
-            finally:
-                page.close()
-        except Exception as e:
-            result_box["error"] = e
-
-    try:
-        browser.close()
-        pw.stop()
-    except Exception:
-        pass
-
-
-def _start_worker_async():
-    global _worker_thread
-    if _worker_thread is None or not _worker_thread.is_alive():
-        _worker_thread = threading.Thread(target=_worker, daemon=True)
-        _worker_thread.start()
-        atexit.register(lambda: _task_queue.put(None))
-
-
-# 在模块导入时提前异步启动 Playwright 进程，优化首次抓取体验
-_start_worker_async()
-
-
-def _ensure_worker():
-    _start_worker_async()
-    _ready.wait(timeout=30)
+# ── Cloudflare 等待条件 ───────────────────────────────
+_CF_WAIT_FN = "() => !document.title.includes('Just a moment')"
 
 
 def _fetch_with_playwright(url: str) -> str:
-    _ensure_worker()
-    result_box = {}
-    _task_queue.put((url, result_box))
-    for _ in range(600):
-        if "html" in result_box or "error" in result_box:
-            break
-        time.sleep(0.1)
-    if "error" in result_box:
-        raise result_box["error"]
-    return result_box.get("html", "[页面获取超时]")
+    """使用共享 Playwright 池绕过 Cloudflare，并提取 CF cookie 缓存"""
+    from novel_sources import playwright_base
+    pool = playwright_base.get_pool()
+    html = pool.fetch_html(url, wait_fn=_CF_WAIT_FN, wait_timeout=15000)
+
+    # 提取并持久化 Cloudflare cookie（供后续 requests 直接使用）
+    try:
+        all_cookies = pool.get_cookies()
+        cf_dict = {
+            c["name"]: c["value"]
+            for c in all_cookies
+            if c.get("name") in ("cf_clearance", "__cf_bm", "is_human")
+            and "dadehe.com" in c.get("domain", "")
+        }
+        if cf_dict:
+            cache.set_meta("dadehe_cf_cookies", cf_dict, ttl=3600)
+    except Exception as e:
+        print(f"[dadehe] cookie 提取失败: {e}")
+
+    return html
 
 
 def _fetch_page(url: str) -> str:
-    """优先 requests+cookie（快），失败回退 Playwright（慢）"""
+    """优先 requests+cookie（快），失败回退共享 Playwright 池（慢）"""
     cookies = cache.get_meta("dadehe_cf_cookies") or {}
 
     if cookies:
@@ -139,6 +67,13 @@ def _fetch_page(url: str) -> str:
             pass
 
     return _fetch_with_playwright(url)
+
+
+# 在模块导入时预热共享 Playwright 池（后台启动，不阻塞）
+threading.Thread(
+    target=lambda: __import__('novel_sources.playwright_base', fromlist=['get_pool']).get_pool(),
+    daemon=True
+).start()
 
 
 # ── 搜索 ──────────────────────────────────────────────

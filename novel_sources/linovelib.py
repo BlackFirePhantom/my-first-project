@@ -1,13 +1,11 @@
 """
 哔哩轻小说源 (www.linovelib.com)
-直接 requests 抓取目录/搜索，使用后台 Playwright (offscreen) 获取正文以绕过内容截断与加密限制。
+直接 requests 抓取目录/搜索，使用共享 Playwright 池 (playwright_base) 获取正文以绕过内容截断与加密限制。
 """
 
 import re
-import time
-import atexit
 import threading
-from queue import Queue
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
@@ -21,184 +19,100 @@ HEADERS = {
     "Referer": BASE_URL,
 }
 
-# ── Playwright 后台进程管理 ─────────────────────────
-_worker_thread = None
-_task_queue = Queue()
-_ready = threading.Event()
+# ── Playwright JS 常量 ────────────────────────────────
+# 等待函数：检测混淆样式表是否已将 display:none / scale(0) / absolute 注入
+_WAIT_FN = r"""
+() => {
+    const el = document.querySelector('div#mlfy_main_text');
+    if (!el || !el.innerText) return false;
+    const text = el.innerText;
+    if (text.includes('内容加载失败') || text.includes('內容加載失敗') ||
+        text.includes('数据缺失') || text.includes('正在加载')) {
+        return false;
+    }
+    for (let i = 0; i < document.styleSheets.length; i++) {
+        try {
+            const sheet = document.styleSheets[i];
+            const rules = sheet.cssRules || sheet.rules;
+            if (!rules) continue;
+            for (let j = 0; j < rules.length; j++) {
+                const rule = rules[j];
+                if (rule.cssText &&
+                    (rule.cssText.includes('display: none') ||
+                     rule.cssText.includes('scale(0)') ||
+                     rule.cssText.includes('absolute')) &&
+                    rule.selectorText && rule.selectorText.includes('TextContent')) {
+                    return true;
+                }
+            }
+        } catch (e) {}
+    }
+    return false;
+}
+"""
 
+# 提取章节数据的 JS：移除注音/干扰标签，过滤隐藏段落，获取下一页链接
+_CHAPTER_JS = r"""
+() => {
+    const container = document.querySelector('#TextContent');
+    if (!container) return { paragraphs: [], nextPage: null };
 
-def _worker():
-    from playwright.sync_api import sync_playwright
+    // 移除注音和无用干扰标签
+    container.querySelectorAll('rt').forEach(rt => rt.remove());
+    container.querySelectorAll('.dag').forEach(dag => dag.remove());
 
-    pw = sync_playwright().start()
-    browser = pw.chromium.launch(
-        headless=False,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--window-position=-32000,-32000",
-            "--window-size=10,10"
-        ],
-    )
-    context = browser.new_context(
-        user_agent=HEADERS["User-Agent"],
-        viewport={"width": 1024, "height": 768},
-    )
-    context.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
-    _ready.set()
+    const pTags = Array.from(container.querySelectorAll('p'));
+    const paragraphs = [];
+    if (pTags.length > 0) {
+        pTags.forEach(p => {
+            const style = window.getComputedStyle(p);
+            const isHidden = style.display === 'none' ||
+                             style.position === 'absolute' ||
+                             style.transform.includes('matrix(0');
+            if (!isHidden) {
+                const text = p.innerText.trim();
+                if (text) paragraphs.push(text);
+            }
+        });
+    } else {
+        const text = container.innerText.trim();
+        if (text) {
+            paragraphs.push(...text.split('\n').map(s => s.trim()).filter(s => s));
+        }
+    }
 
-    while True:
-        task = _task_queue.get()
-        if task is None:
-            break
-        url, result_box = task
-        mode = result_box.get("_mode", "html")  # 'html' 或 'chapter'
-        try:
-            print(f"[Worker] Opening page ({mode}): {url}")
-            page = context.new_page()
-            try:
-                page.goto(url, timeout=30000)
-                # 等待正文元素渲染并加载，并且等待混淆 JS 的样式表规则被注入（超时则回退继续）
-                try:
-                    page.wait_for_function(
-                        """() => {
-                            const el = document.querySelector('div#mlfy_main_text');
-                            if (!el || !el.innerText) return false;
-                            const text = el.innerText;
-                            if (text.includes('内容加载失败') || text.includes('內容加載失敗') || text.includes('数据缺失') || text.includes('正在加载')) {
-                                return false;
-                            }
-                            // 检查混淆脚本是否已将 display: none 或 scale(0) 样式规则注入
-                            for (let i = 0; i < document.styleSheets.length; i++) {
-                                try {
-                                    const sheet = document.styleSheets[i];
-                                    const rules = sheet.cssRules || sheet.rules;
-                                    if (!rules) continue;
-                                    for (let j = 0; j < rules.length; j++) {
-                                        const rule = rules[j];
-                                        if (rule.cssText && 
-                                            (rule.cssText.includes('display: none') || rule.cssText.includes('scale(0)') || rule.cssText.includes('absolute')) && 
-                                            rule.selectorText && rule.selectorText.includes('TextContent')) {
-                                            return true;
-                                        }
-                                    }
-                                } catch (e) {}
-                            }
-                            return false;
-                        }""",
-                        timeout=8000
-                    )
-                except Exception as e:
-                    print(f"[Worker] Wait for style rules timeout or error (might have no scramble): {e}")
-
-                if mode == "chapter":
-                    # 直接在浏览器中移除 rt(拼音) 和 .dag(干扰项)，过滤掉 display:none 或 transform:scale(0) 的混淆克隆段落
-                    data = page.evaluate("""
-                        () => {
-                            const container = document.querySelector('#TextContent');
-                            if (!container) return { paragraphs: [], nextPage: null };
-
-                            // 移除注音和无用干扰标签
-                            const rtTags = container.querySelectorAll('rt');
-                            rtTags.forEach(rt => rt.remove());
-                            const dagTags = container.querySelectorAll('.dag');
-                            dagTags.forEach(dag => dag.remove());
-
-                            const pTags = Array.from(container.querySelectorAll('p'));
-                            const paragraphs = [];
-                            if (pTags.length > 0) {
-                                pTags.forEach(p => {
-                                    const style = window.getComputedStyle(p);
-                                    const isHidden = style.display === 'none' || 
-                                                     style.position === 'absolute' || 
-                                                     style.transform.includes('matrix(0');
-                                    if (!isHidden) {
-                                        const text = p.innerText.trim();
-                                        if (text) {
-                                            paragraphs.push(text);
-                                        }
-                                    }
-                                });
-                            } else {
-                                const text = container.innerText.trim();
-                                if (text) {
-                                    paragraphs.push(...text.split('\\n').map(s => s.trim()).filter(s => s));
-                                }
-                            }
-
-                            // 获取"下一页"链接
-                            let nextPage = null;
-                            const links = document.querySelectorAll('.mlfy_page a');
-                            for (const a of links) {
-                                const t = a.innerText.trim();
-                                if (t.includes('下一页') || t.includes('下一章')) {
-                                    nextPage = a.href;
-                                    break;
-                                }
-                            }
-                            return { paragraphs, nextPage };
-                        }
-                    """)
-                    result_box["chapter_data"] = data
-                else:
-                    result_box["html"] = page.content()
-            finally:
-                page.close()
-        except Exception as e:
-            print(f"[Worker] Exception for {url}: {e}")
-            result_box["error"] = e
-
-    try:
-        browser.close()
-        pw.stop()
-    except Exception:
-        pass
-
-
-def _start_worker_async():
-    global _worker_thread
-    if _worker_thread is None or not _worker_thread.is_alive():
-        _worker_thread = threading.Thread(target=_worker, daemon=True)
-        _worker_thread.start()
-        atexit.register(lambda: _task_queue.put(None))
-
-
-def _ensure_worker():
-    _start_worker_async()
-    _ready.wait(timeout=30)
+    // 获取"下一页"链接
+    let nextPage = null;
+    const links = document.querySelectorAll('.mlfy_page a');
+    for (const a of links) {
+        const t = a.innerText.trim();
+        if (t.includes('下一页') || t.includes('下一章')) {
+            nextPage = a.href;
+            break;
+        }
+    }
+    return { paragraphs, nextPage };
+}
+"""
 
 
 def fetch_html(url: str) -> str:
-    """获取整页 HTML（使用 Playwright 绕过 Cloudflare）"""
-    _ensure_worker()
-    result_box = {"_mode": "html"}
-    _task_queue.put((url, result_box))
-    for _ in range(600):
-        if "html" in result_box or "error" in result_box:
-            break
-        time.sleep(0.1)
-    if "error" in result_box:
-        raise result_box["error"]
-    return result_box.get("html", "[页面获取超时]")
+    """获取整页 HTML（使用共享 Playwright 池绕过 Cloudflare）"""
+    from novel_sources import playwright_base
+    return playwright_base.get_pool().fetch_html(url)
 
 
 def _fetch_chapter_data(url: str) -> dict:
     """
     在 Playwright 浏览器中直接通过 JS evaluate() 提取章节数据。
-    直接获取可见的段落文本和下一页链接，完美排除混淆段落和注音。
+    使用共享池并发执行，不再串行排队。
     返回: {"paragraphs": list[str], "nextPage": str or None}
     """
-    _ensure_worker()
-    result_box = {"_mode": "chapter"}
-    _task_queue.put((url, result_box))
-    for _ in range(600):
-        if "chapter_data" in result_box or "error" in result_box:
-            break
-        time.sleep(0.1)
-    if "error" in result_box:
-        raise result_box["error"]
-    return result_box.get("chapter_data", {"paragraphs": [], "nextPage": None})
+    from novel_sources import playwright_base
+    result = playwright_base.get_pool().fetch_evaluate(
+        url, _CHAPTER_JS, wait_fn=_WAIT_FN, wait_timeout=8000
+    )
+    return result if result else {"paragraphs": [], "nextPage": None}
 
 
 # ── 书源基础功能接口 ──────────────────────────────────
@@ -428,12 +342,18 @@ def get_content(chapter_url: str) -> str:
 
 
 def prefetch(chapter_urls: list[str]):
-    """后台预读后续章节"""
+    """后台并发预读后续章节（利用共享池的多页并发能力）"""
     def _do_prefetch():
-        for url in chapter_urls:
-            try:
-                get_content(url)
-            except Exception:
-                pass
+        # 过滤掉已缓存的章节，只预读缺失的
+        urls_to_fetch = [u for u in chapter_urls if not cache.get_content(u)]
+        if not urls_to_fetch:
+            return
+        with ThreadPoolExecutor(max_workers=len(urls_to_fetch)) as executor:
+            futures = [executor.submit(get_content, url) for url in urls_to_fetch]
+            for f in futures:
+                try:
+                    f.result()
+                except Exception:
+                    pass
 
     threading.Thread(target=_do_prefetch, daemon=True).start()

@@ -214,55 +214,104 @@ def search(keyword: str) -> list[dict]:
     )
 
 
+def _is_cf_blocked(html: str) -> bool:
+    """判断 HTML 是否是 Cloudflare 拦截页（Just a moment / 挑战页）"""
+    cf_keywords = ("Just a moment", "Checking your browser", "Attention Required",
+                   "安全检查", "ddos-guard", "cf-browser-verification")
+    return any(k in html for k in cf_keywords)
+
+
+def _make_catalog_candidates(novel_url: str) -> list[tuple[str, dict]]:
+    """
+    生成候选目录 URL 列表（含对应的请求头）。
+    Azure 云服务器 IP 常被 Cloudflare 拦截，故按顺序尝试：
+      1. 原始 www.linovelib.com
+      2. 手机版 w.linovelib.com（CF 防护较轻）
+      3. 镜像站 www.bilinovel.com（独立 CDN）
+    """
+    # 构造原始目录 URL
+    if "/catalog" in novel_url:
+        base_catalog = novel_url
+    elif novel_url.endswith(".html"):
+        base_catalog = novel_url.replace(".html", "/catalog")
+    else:
+        base_catalog = novel_url.rstrip("/") + "/catalog"
+
+    candidates = []
+    # 1. 原始域
+    candidates.append((base_catalog, {**HEADERS, "Referer": BASE_URL}))
+    # 2. 手机版（仅对 linovelib.com 适用）
+    if "linovelib.com" in base_catalog:
+        wap_url = base_catalog.replace("www.linovelib.com", "w.linovelib.com")
+        candidates.append((wap_url, {**HEADERS,
+                                      "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
+                                                    "(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+                                      "Referer": "https://w.linovelib.com/"}))
+        bili_url = base_catalog.replace("www.linovelib.com", "www.bilinovel.com")
+        candidates.append((bili_url, {**HEADERS, "Referer": "https://www.bilinovel.com/"}))
+    return candidates
+
+
 def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
-    """获取小说所有章节目录"""
+    """获取小说所有章节目录（自动尝试多个镜像，绕过 Cloudflare）"""
     if not force_refresh:
         cached = cache.get_chapters(novel_url)
         if cached:  # 只有非空缓存才使用，空列表视为无效缓存
             return cached
-            
-    # 构造目录 URL
-    if "/catalog" in novel_url:
-        catalog_url = novel_url
-    elif novel_url.endswith(".html"):
-        catalog_url = novel_url.replace(".html", "/catalog")
-    else:
-        catalog_url = novel_url.rstrip("/") + "/catalog"
-        
-    # 获取目录 HTML
-    print(f"[linovelib] 正在获取目录: {catalog_url}")
-    try:
-        resp = robust_get(catalog_url, headers=HEADERS, timeout=15)
-        print(f"[linovelib] requests 状态码: {resp.status_code}, 内容长度: {len(resp.text)}")
-        if resp.status_code != 200:
-            raise Exception(f"HTTP status code {resp.status_code}")
-        # 检查是否为 Cloudflare 等人机挑战页面
-        if any(k in resp.text for k in ("Just a moment", "Checking your browser", "安全检查", "ddos-guard")):
-            raise Exception("Detected Cloudflare/DDOS protection page")
-        html = resp.text
-    except Exception as e:
-        print(f"[linovelib] requests get catalog failed: {e}. Falling back to Playwright...")
+
+    candidates = _make_catalog_candidates(novel_url)
+    html = None
+    used_url = None
+    last_error = "未知错误"
+
+    for try_url, try_headers in candidates:
+        print(f"[linovelib] 尝试获取目录: {try_url}")
+        # ── Step 1: requests ──────────────────────────────────────
         try:
-            html = fetch_html(catalog_url)
-            print(f"[linovelib] Playwright 获取成功, 内容长度: {len(html)}")
-            # 检查 Playwright 返回的 title
+            resp = robust_get(try_url, headers=try_headers, timeout=15)
+            print(f"[linovelib] requests 状态码: {resp.status_code}, 长度: {len(resp.text)}")
+            if resp.status_code == 200 and not _is_cf_blocked(resp.text):
+                html = resp.text
+                used_url = try_url
+                break
+            last_error = f"requests failed ({resp.status_code} or CF block)"
+        except Exception as e:
+            last_error = str(e)
+            print(f"[linovelib] requests 异常: {e}")
+
+        # ── Step 2: Playwright fallback ───────────────────────────
+        print(f"[linovelib] 使用 Playwright 重试: {try_url}")
+        try:
+            candidate_html = fetch_html(try_url)
             import re as _re
-            title_match = _re.search(r'<title>([^<]+)</title>', html)
-            print(f"[linovelib] Playwright 页面标题: {title_match.group(1) if title_match else '无法提取'}")
+            title_match = _re.search(r'<title>([^<]+)</title>', candidate_html)
+            page_title = title_match.group(1).strip() if title_match else "无"
+            print(f"[linovelib] Playwright 页面标题: {page_title}, 长度: {len(candidate_html)}")
+            if not _is_cf_blocked(candidate_html):
+                html = candidate_html
+                used_url = try_url
+                break
+            print(f"[linovelib] Playwright 仍被 CF 拦截 ({try_url})，尝试下一个镜像...")
+            last_error = f"Playwright CF block on {try_url}"
         except Exception as pe:
-            raise Exception(f"获取目录失败。Requests 错误: {e}; Playwright 错误: {pe}")
-        
+            last_error = str(pe)
+            print(f"[linovelib] Playwright 异常: {pe}")
+
+    if not html:
+        raise Exception(f"所有镜像均无法获取目录，请稍后重试。最后错误: {last_error}")
+
+    print(f"[linovelib] 成功获取目录来源: {used_url}")
     soup = BeautifulSoup(html, "lxml")
-    
+
     # 提取小说名称，以便用于去除卷标题中的小说名
     novel_name_meta = soup.find("meta", property="og:novel:book_name")
     novel_name = novel_name_meta["content"] if novel_name_meta else None
-    
+
     chapters = []
-    
+
     # 遍历每个卷 volume 容器
     volumes = soup.select(".volume-list > .volume")
-    print(f"[linovelib] 找到 {len(volumes)} 个卷，soup.title={soup.title.get_text() if soup.title else '无'}")
+    print(f"[linovelib] 找到 {len(volumes)} 个卷")
     if not volumes:
         # Fallback: 如果没有 .volume 结构，直接找所有的 a
         seen = set()
@@ -270,38 +319,37 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
             href = a.get("href", "")
             text = a.get_text(strip=True)
             if href and text and "/novel/" in href and ".html" in href and "vol_" not in href:
-                full_url = urljoin(catalog_url, href)
+                full_url = urljoin(used_url, href)
+                # 将镜像域名统一回 www.linovelib.com，保证正文可正常获取
+                full_url = full_url.replace("w.linovelib.com", "www.linovelib.com") \
+                                   .replace("www.bilinovel.com", "www.linovelib.com")
                 if full_url not in seen:
                     seen.add(full_url)
-                    chapters.append({
-                        "title": text,
-                        "url": full_url
-                    })
+                    chapters.append({"title": text, "url": full_url})
     else:
         for vol in volumes:
             # 提取卷标题
             vol_info = vol.select_one(".volume-info h2.v-line")
             vol_title = vol_info.get_text(strip=True) if vol_info else ""
-            
+
             # 去除卷标题中冗余的书名前缀
             if vol_title and novel_name and vol_title.startswith(novel_name):
                 vol_title = vol_title[len(novel_name):].strip()
-                
+
             # 提取卷下的所有章节链接
             for a in vol.select("ul.chapter-list li a"):
                 href = a.get("href", "")
                 text = a.get_text(strip=True)
                 if href and text and "vol_" not in href:
-                    full_url = urljoin(catalog_url, href)
-                    
-                    # 拼接标题，如 "[1 旧校舍的恶魔] 插图"
+                    full_url = urljoin(used_url, href)
+                    # 将镜像域名统一回 www.linovelib.com
+                    full_url = full_url.replace("w.linovelib.com", "www.linovelib.com") \
+                                       .replace("www.bilinovel.com", "www.linovelib.com")
                     title = f"[{vol_title}] {text}" if vol_title else text
-                    chapters.append({
-                        "title": title,
-                        "url": full_url
-                    })
-                    
-    if chapters:  # 只缓存非空的目录，避免把爬取失败的空结果写入缓存
+                    chapters.append({"title": title, "url": full_url})
+
+    if chapters:
+        print(f"[linovelib] 共获取到 {len(chapters)} 个章节，写入缓存")
         cache.set_chapters(novel_url, chapters)
     else:
         print(f"[linovelib] 警告: 获取到空章节列表，不写入缓存，下次将重新获取")

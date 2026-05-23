@@ -69,7 +69,7 @@ def _worker():
                             if (text.includes('内容加载失败') || text.includes('內容加載失敗') || text.includes('数据缺失') || text.includes('正在加载')) {
                                 return false;
                             }
-                            // 检查混淆脚本是否已将 display: none 样式规则注入
+                            // 检查混淆脚本是否已将 display: none 或 scale(0) 样式规则注入
                             for (let i = 0; i < document.styleSheets.length; i++) {
                                 try {
                                     const sheet = document.styleSheets[i];
@@ -77,7 +77,8 @@ def _worker():
                                     if (!rules) continue;
                                     for (let j = 0; j < rules.length; j++) {
                                         const rule = rules[j];
-                                        if (rule.cssText && rule.cssText.includes('display: none') && 
+                                        if (rule.cssText && 
+                                            (rule.cssText.includes('display: none') || rule.cssText.includes('scale(0)') || rule.cssText.includes('absolute')) && 
                                             rule.selectorText && rule.selectorText.includes('TextContent')) {
                                             return true;
                                         }
@@ -92,7 +93,7 @@ def _worker():
                     print(f"[Worker] Wait for style rules timeout or error (might have no scramble): {e}")
 
                 if mode == "chapter":
-                    # 直接在浏览器中移除 rt(拼音) 和 .dag(干扰项)，过滤掉 display:none 的混淆克隆段落
+                    # 直接在浏览器中移除 rt(拼音) 和 .dag(干扰项)，过滤掉 display:none 或 transform:scale(0) 的混淆克隆段落
                     data = page.evaluate("""
                         () => {
                             const container = document.querySelector('#TextContent');
@@ -109,7 +110,10 @@ def _worker():
                             if (pTags.length > 0) {
                                 pTags.forEach(p => {
                                     const style = window.getComputedStyle(p);
-                                    if (style.display !== 'none') {
+                                    const isHidden = style.display === 'none' || 
+                                                     style.position === 'absolute' || 
+                                                     style.transform.includes('matrix(0');
+                                    if (!isHidden) {
                                         const text = p.innerText.trim();
                                         if (text) {
                                             paragraphs.push(text);

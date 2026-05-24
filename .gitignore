@@ -22,3 +22,7 @@ pip-log.txt
 
 # Root HTML files (test output files)
 /*.html
+
+# Environment / secrets (never commit!)
+.env
+.env.*

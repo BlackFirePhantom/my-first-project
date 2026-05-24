@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 — 小说阅读器</title>
+    <meta name="description" content="登录到您的私人小说阅读器">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --bg-card: #151d30;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            --accent-glow: rgba(99, 102, 241, 0.35);
+            --accent: #6366f1;
+            --text: #f3f4f6;
+            --text-dim: #9ca3af;
+            --red: #ef4444;
+            --radius: 16px;
+            --radius-sm: 10px;
+            --border: rgba(255, 255, 255, 0.06);
+            --shadow-lg: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-image:
+                radial-gradient(at 0% 0%,   rgba(99, 102, 241, 0.12) 0, transparent 55%),
+                radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.08) 0, transparent 55%),
+                radial-gradient(at 50% 50%,  rgba(99, 102, 241, 0.04) 0, transparent 70%);
+        }
+
+        /* 背景粒子装饰 */
+        .bg-orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            pointer-events: none;
+            animation: orb-drift 8s ease-in-out infinite alternate;
+        }
+        .bg-orb-1 {
+            width: 400px; height: 400px;
+            background: rgba(99, 102, 241, 0.08);
+            top: -100px; left: -100px;
+            animation-duration: 9s;
+        }
+        .bg-orb-2 {
+            width: 350px; height: 350px;
+            background: rgba(168, 85, 247, 0.06);
+            bottom: -80px; right: -80px;
+            animation-duration: 11s;
+            animation-direction: alternate-reverse;
+        }
+        @keyframes orb-drift {
+            from { transform: translate(0, 0) scale(1); }
+            to   { transform: translate(30px, 20px) scale(1.05); }
+        }
+
+        /* 登录卡片 */
+        .login-wrapper {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 420px;
+            padding: 1rem;
+        }
+
+        /* 顶部品牌 */
+        .brand-header {
+            text-align: center;
+            margin-bottom: 2rem;
+            animation: fade-down 0.5s ease both;
+        }
+        .brand-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 72px; height: 72px;
+            border-radius: 20px;
+            background: var(--accent-gradient);
+            box-shadow: 0 8px 32px var(--accent-glow);
+            margin-bottom: 1rem;
+            animation: icon-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+        }
+        .brand-icon svg {
+            width: 36px; height: 36px;
+            fill: #fff;
+        }
+        .brand-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+        }
+        .brand-subtitle {
+            font-size: 0.9rem;
+            color: var(--text-dim);
+            margin-top: 0.3rem;
+        }
+
+        /* 卡片主体 */
+        .login-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-lg);
+            padding: 2.2rem 2rem;
+            animation: fade-up 0.5s ease 0.15s both;
+            /* Glassmorphism 效果 */
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            position: relative;
+            overflow: hidden;
+        }
+        /* 卡片顶部渐变光条 */
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: var(--accent-gradient);
+        }
+
+        /* 错误提示 */
+        .error-alert {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            background: rgba(239, 68, 68, 0.1);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 0.85rem 1.2rem;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+            animation: shake 0.4s ease;
+        }
+        .error-alert svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%       { transform: translateX(-6px); }
+            40%       { transform: translateX(6px); }
+            60%       { transform: translateX(-4px); }
+            80%       { transform: translateX(4px); }
+        }
+
+        /* 表单 */
+        .form-group {
+            margin-bottom: 1.4rem;
+        }
+        .form-label {
+            display: block;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-dim);
+            margin-bottom: 0.55rem;
+            letter-spacing: 0.02em;
+        }
+        .input-wrapper {
+            position: relative;
+        }
+        .input-icon {
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-dim);
+            pointer-events: none;
+            transition: color 0.2s;
+        }
+        .input-icon svg { width: 18px; height: 18px; fill: currentColor; }
+        .form-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.85rem 1rem 0.85rem 2.8rem;
+            color: var(--text);
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .form-input:focus {
+            border-color: var(--accent);
+            background: rgba(99, 102, 241, 0.05);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .form-input:focus + .input-icon,
+        .input-wrapper:focus-within .input-icon { color: var(--accent); }
+        /* 重新排列图标（fixed: icon在input前面） */
+        .input-wrapper .form-input { order: 1; }
+        .input-wrapper .input-icon { order: 0; }
+
+        /* 眼睛按钮（显示/隐藏密码） */
+        .toggle-pwd {
+            position: absolute;
+            right: 0.9rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-dim);
+            padding: 0.3rem;
+            border-radius: 6px;
+            transition: color 0.2s;
+            display: flex;
+            align-items: center;
+        }
+        .toggle-pwd:hover { color: var(--text); }
+        .toggle-pwd svg { width: 18px; height: 18px; fill: currentColor; }
+
+        /* 登录按钮 */
+        .btn-login {
+            width: 100%;
+            padding: 0.9rem;
+            background: var(--accent-gradient);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 1rem;
+            font-weight: 700;
+            font-family: inherit;
+            cursor: pointer;
+            box-shadow: 0 4px 16px var(--accent-glow);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            letter-spacing: 0.03em;
+        }
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px var(--accent-glow);
+        }
+        .btn-login:active { transform: translateY(0); }
+        .btn-login svg { width: 18px; height: 18px; fill: currentColor; }
+
+        /* 底部安全提示 */
+        .security-note {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.82rem;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            opacity: 0.7;
+            animation: fade-up 0.5s ease 0.3s both;
+        }
+        .security-note svg { width: 13px; height: 13px; fill: currentColor; }
+
+        /* 动画 */
+        @keyframes fade-down {
+            from { opacity: 0; transform: translateY(-20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fade-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes icon-pop {
+            from { opacity: 0; transform: scale(0.5); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景装饰 -->
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+
+    <div class="login-wrapper">
+        <!-- 品牌头部 -->
+        <div class="brand-header">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24">
+                    <path d="M21 4H3a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1zM4 18V6h7v12H4zm9 0V6h7v12h-7z"/>
+                </svg>
+            </div>
+            <div class="brand-title">小说阅读器</div>
+            <div class="brand-subtitle">私人专属 · 请验证身份</div>
+        </div>
+
+        <!-- 登录卡片 -->
+        <div class="login-card">
+            {% if error %}
+            <div class="error-alert" id="login-error-alert">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form method="post" action="/login" id="login-form">
+                <div class="form-group">
+                    <label class="form-label" for="password-input">访问密码</label>
+                    <div class="input-wrapper">
+                        <input
+                            class="form-input"
+                            type="password"
+                            id="password-input"
+                            name="password"
+                            placeholder="请输入密码"
+                            autocomplete="current-password"
+                            autofocus
+                            required
+                        >
+                        <span class="input-icon">
+                            <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                        </span>
+                        <button type="button" class="toggle-pwd" id="toggle-pwd-btn" aria-label="显示/隐藏密码">
+                            <svg id="eye-icon" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-login" id="login-submit-btn">
+                    <svg viewBox="0 0 24 24"><path d="M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z"/></svg>
+                    进入阅读器
+                </button>
+            </form>
+        </div>
+
+        <!-- 安全提示 -->
+        <div class="security-note">
+            <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+            私人访问 · 仅供本人使用
+        </div>
+    </div>
+
+    <script>
+        // 切换密码显示/隐藏
+        const toggleBtn = document.getElementById('toggle-pwd-btn');
+        const pwdInput  = document.getElementById('password-input');
+        const eyeIcon   = document.getElementById('eye-icon');
+
+        const eyeOpen   = 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z';
+        const eyeClosed = 'M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z';
+
+        toggleBtn.addEventListener('click', () => {
+            const isHidden = pwdInput.type === 'password';
+            pwdInput.type = isHidden ? 'text' : 'password';
+            eyeIcon.querySelector('path').setAttribute('d', isHidden ? eyeClosed : eyeOpen);
+            toggleBtn.style.color = isHidden ? 'var(--accent)' : '';
+        });
+
+        // 提交时按钮反馈
+        document.getElementById('login-form').addEventListener('submit', function() {
+            const btn = document.getElementById('login-submit-btn');
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'not-allowed';
+        });
+    </script>
+</body>
+</html>

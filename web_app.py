@@ -2,23 +2,126 @@
 小说阅读器 Web 版
 运行: python web_app.py
 浏览器打开: http://localhost:5000
+
+首次使用前请先运行: python setup_password.py  设置访问密码
 """
 
 import json
+import os
+import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import wraps
 from pathlib import Path
 
 import requests as http_requests
 from bs4 import BeautifulSoup
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from werkzeug.security import check_password_hash
 
 from novel_sources import registry
 
+# ── 加载 .env 配置 ────────────────────────────────────
+_ENV_FILE = Path(__file__).parent / ".env"
+
+
+def _load_dotenv():
+    """简单解析 .env 文件，将键值注入环境变量（不覆盖已有变量）"""
+    if not _ENV_FILE.exists():
+        return
+    for line in _ENV_FILE.read_text("utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+
+_load_dotenv()
+
+# ── Flask 应用初始化 ──────────────────────────────────
 app = Flask(__name__)
-app.secret_key = "novel-reader-secret-key"
+
+# 从环境变量读取 SECRET_KEY，若未配置则动态生成（重启后 session 失效，属正常行为）
+_secret_key = os.environ.get("SECRET_KEY", "")
+if not _secret_key:
+    _secret_key = secrets.token_hex(64)
+    print("[警告] 未找到 SECRET_KEY 配置，已使用临时密钥。请运行 python setup_password.py 进行初始设置。")
+app.secret_key = _secret_key
+
+# Session 安全配置
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,   # 禁止 JavaScript 读取 Cookie
+    SESSION_COOKIE_SAMESITE="Lax", # 防止 CSRF 跨站请求
+    SESSION_COOKIE_SECURE=False,    # 仅 HTTPS 时改为 True
+    PERMANENT_SESSION_LIFETIME=7 * 24 * 3600,  # Session 有效期 7 天
+)
 
 BOOKSHELF_FILE = Path(__file__).parent / "bookshelf.json"
+
+
+# ── 认证相关 ──────────────────────────────────────────
+def _get_password_hash() -> str | None:
+    """从环境变量获取密码哈希"""
+    return os.environ.get("PASSWORD_HASH") or None
+
+
+def login_required(f):
+    """路由装饰器：未登录则重定向到登录页"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("authenticated"):
+            return redirect(url_for("login", next=request.url))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _json_login_required(f):
+    """API 路由装饰器：未登录返回 401 JSON"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("authenticated"):
+            return jsonify({"error": "未授权，请先登录"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    # 已登录直接跳首页
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        pwd_hash = _get_password_hash()
+
+        if not pwd_hash:
+            error = "尚未设置访问密码，请先运行 python setup_password.py"
+        elif check_password_hash(pwd_hash, password):
+            session.permanent = True
+            session["authenticated"] = True
+            next_url = request.args.get("next") or url_for("index")
+            # 安全检查：确保 next 是站内地址
+            if next_url and (next_url.startswith("http://") or next_url.startswith("https://")):
+                next_url = url_for("index")
+            return redirect(next_url)
+        else:
+            # 添加轻微延迟，防止暴力破解
+            time.sleep(0.5)
+            error = "密码不正确，请重试"
+
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 # ── 工具 ──────────────────────────────────────────────
@@ -44,7 +147,7 @@ def _find_shelf_key(shelf: dict, url: str) -> str | None:
     return None
 
 
-def _get_source(source_id: str=None):
+def _get_source(source_id: str = None):
     """获取指定源，不指定则返回默认源"""
     if source_id:
         mod = registry.get(source_id)
@@ -60,6 +163,7 @@ def _all_sources():
 
 # ── 页面路由 ──────────────────────────────────────────
 @app.route("/")
+@login_required
 def index():
     shelf = load_bookshelf()
     novels = []
@@ -80,6 +184,7 @@ def index():
 
 
 @app.route("/search")
+@login_required
 def search():
     keyword = request.args.get("q", "").strip()
     source_id = request.args.get("source", "")
@@ -99,7 +204,7 @@ def search():
         else:
             all_sources = _all_sources()
             errors = []
-            
+
             def fetch_search(sid, sname):
                 try:
                     src = _get_source(sid)
@@ -112,7 +217,7 @@ def search():
                 except Exception as e:
                     return [], f"【{sname}】搜索失败: {e}"
                 return [], None
-            
+
             with ThreadPoolExecutor(max_workers=max(1, len(all_sources))) as executor:
                 future_to_source = {
                     executor.submit(fetch_search, sid, sname): (sid, sname)
@@ -145,6 +250,7 @@ def search():
 
 
 @app.route("/novel/<path:novel_url>")
+@login_required
 def novel_detail(novel_url):
     full_url = novel_url
     source_id = request.args.get("source", "")
@@ -159,7 +265,7 @@ def novel_detail(novel_url):
     shelf = load_bookshelf()
     shelf_key = _find_shelf_key(shelf, full_url) or full_url
     shelf_info = shelf.get(shelf_key, {})
-    
+
     novel_name = shelf_info.get("name")
     cover_url = shelf_info.get("cover")
 
@@ -185,7 +291,7 @@ def novel_detail(novel_url):
                     html = source.fetch_html(full_url)
                 else:
                     raise e
-            
+
             if not html:
                 raise Exception("无法获取页面内容")
 
@@ -249,6 +355,7 @@ def novel_detail(novel_url):
 
 
 @app.route("/read/<path:novel_url>/<int:chapter_idx>")
+@login_required
 def read_chapter(novel_url, chapter_idx):
     full_url = novel_url
     source_id = request.args.get("source", "")
@@ -256,7 +363,7 @@ def read_chapter(novel_url, chapter_idx):
     # 从书架中获取之前记录的源
     shelf = load_bookshelf()
     shelf_key = _find_shelf_key(shelf, full_url)
-    
+
     if shelf_key and not source_id:
         source_id = shelf[shelf_key].get("source", "")
 
@@ -309,6 +416,7 @@ def read_chapter(novel_url, chapter_idx):
 
 
 @app.route("/api/bookshelf/progress", methods=["POST"])
+@_json_login_required
 def api_bookshelf_progress():
     data = request.json
     url = data.get("url")
@@ -332,14 +440,15 @@ def api_bookshelf_progress():
     return jsonify({"error": "书籍不在书架中"}), 404
 
 
-
 @app.route("/api/sources")
+@_json_login_required
 def api_sources():
     """API: 返回所有可用书源"""
     return jsonify([{"id": sid, "name": name} for sid, name in _all_sources()])
 
 
 @app.route("/api/bookshelf", methods=["POST"])
+@_json_login_required
 def api_bookshelf():
     data = request.json
     url = data.get("url")
@@ -363,6 +472,7 @@ def api_bookshelf():
 
 
 @app.route("/api/bookshelf/<path:url>", methods=["DELETE"])
+@_json_login_required
 def api_delete_bookshelf(url):
     shelf = load_bookshelf()
     shelf_key = _find_shelf_key(shelf, url)
@@ -373,11 +483,18 @@ def api_delete_bookshelf(url):
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
-    print("\n  小说阅读器已启动")
+
+    # 检查是否已配置密码
+    if not _get_password_hash():
+        print("\n  ⚠️  警告：尚未设置访问密码！")
+        print("  请先运行: python setup_password.py\n")
+
+    print("\n  小说阅读器已启动（已启用访问保护）")
     print(f"  浏览器打开: http://localhost:{port}\n")
     print(f"  Debug 模式: {'开启' if debug else '关闭（生产模式）'}\n")
-    app.run(host="0.0.0.0", port=port, debug=debug)
 
+    # 默认仅监听本机，防止局域网直接访问
+    host = os.environ.get("HOST", "127.0.0.1")
+    app.run(host=host, port=port, debug=debug)

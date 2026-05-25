@@ -81,10 +81,12 @@ def get_chapters(novel_url: str, force_refresh: bool = False) -> list[dict]:
 
         # 找"下一页"链接
         next_page = None
-        for a in section.select("a"):
-            if "下一" in a.get_text(strip=True):
-                next_page = a.get("href", "").rstrip("/")
-                break
+        index_container = section.select_one("div.index-container")
+        if index_container:
+            for a in index_container.select("a.index-container-btn"):
+                if "下一" in a.get_text(strip=True):
+                    next_page = a.get("href", "").rstrip("/")
+                    break
 
         if next_page:
             page_url = BASE_URL + next_page

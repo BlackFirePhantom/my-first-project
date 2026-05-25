@@ -32,11 +32,12 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // 仅拦截 http/https，并排除 API、登录和登出等后台交互页面
+  // 仅拦截 http/https，并排除 API、登录、登出和搜索等动态交互页面
   if (!event.request.url.startsWith('http') || 
       url.pathname.startsWith('/api') || 
       url.pathname === '/login' || 
-      url.pathname === '/logout') {
+      url.pathname === '/logout' || 
+      url.pathname === '/search') {
     return;
   }
 

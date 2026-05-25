@@ -9,6 +9,7 @@
 import json
 import os
 import secrets
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
@@ -59,6 +60,63 @@ app.config.update(
     SESSION_COOKIE_SECURE=False,    # 仅 HTTPS 时改为 True
     PERMANENT_SESSION_LIFETIME=7 * 24 * 3600,  # Session 有效期 7 天
 )
+
+active_downloads = {}
+download_lock = threading.Lock()
+
+
+def _download_novel_task(novel_url, source_id, start_idx, end_idx):
+    source = _get_source(source_id)
+    try:
+        chapters = source.get_chapters(novel_url)
+    except Exception as e:
+        with download_lock:
+            active_downloads[novel_url] = {
+                "status": "failed",
+                "error": f"获取章节目录失败: {e}",
+                "downloaded": 0,
+                "total": 0
+            }
+        return
+
+    start_idx = max(0, min(start_idx, len(chapters) - 1))
+    end_idx = max(start_idx, min(end_idx, len(chapters) - 1))
+    total_to_download = end_idx - start_idx + 1
+
+    with download_lock:
+        active_downloads[novel_url] = {
+            "status": "downloading",
+            "downloaded": 0,
+            "total": total_to_download,
+            "cancel": False,
+            "errors": []
+        }
+
+    downloaded = 0
+    for idx in range(start_idx, end_idx + 1):
+        with download_lock:
+            if active_downloads[novel_url].get("cancel"):
+                active_downloads[novel_url]["status"] = "cancelled"
+                return
+
+        ch = chapters[idx]
+        try:
+            source.get_content(ch["url"])
+        except Exception as e:
+            with download_lock:
+                active_downloads[novel_url]["errors"].append(f"第 {idx+1} 章下载失败: {e}")
+        
+        downloaded += 1
+        with download_lock:
+            active_downloads[novel_url]["downloaded"] = downloaded
+
+        # 单线程小睡，避免给源网站造成过大压力
+        time.sleep(0.3)
+
+    with download_lock:
+        if active_downloads[novel_url]["status"] == "downloading":
+            active_downloads[novel_url]["status"] = "completed"
+
 
 BOOKSHELF_FILE = Path(__file__).parent / "bookshelf.json"
 
@@ -482,13 +540,101 @@ def api_delete_bookshelf(url):
     return jsonify({"ok": True})
 
 
+# ── PWA 路由 ──────────────────────────────────────────
+@app.route("/manifest.json")
+def manifest():
+    return render_template("manifest.json"), 200, {"Content-Type": "application/json"}
+
+
+@app.route("/sw.js")
+def service_worker():
+    return render_template("sw.js"), 200, {"Content-Type": "application/javascript"}
+
+
+# ── 批量下载 API ──────────────────────────────────────
+@app.route("/api/novel/cache_status/<path:novel_url>")
+@_json_login_required
+def api_novel_cache_status(novel_url):
+    source_id = request.args.get("source", "")
+    source = _get_source(source_id)
+    try:
+        chapters = source.get_chapters(novel_url)
+    except Exception as e:
+        return jsonify({"error": f"获取章节失败: {e}"}), 500
+
+    from novel_sources.cache import CONTENT_DIR, _key
+    cached_status = []
+    for ch in chapters:
+        file_path = CONTENT_DIR / f"{_key(ch['url'])}.json"
+        cached_status.append(file_path.exists())
+
+    return jsonify({
+        "total_chapters": len(chapters),
+        "cached": cached_status
+    })
+
+
+@app.route("/api/download/start", methods=["POST"])
+@_json_login_required
+def api_download_start():
+    data = request.json or {}
+    novel_url = data.get("url")
+    source_id = data.get("source", "")
+    start_idx = data.get("start_idx", 0)
+    end_idx = data.get("end_idx", 0)
+
+    if not novel_url:
+        return jsonify({"error": "缺少小说 URL"}), 400
+
+    with download_lock:
+        job = active_downloads.get(novel_url)
+        if job and job.get("status") == "downloading":
+            return jsonify({"error": "该小说已经在下载队列中"}), 409
+
+    t = threading.Thread(
+        target=_download_novel_task,
+        args=(novel_url, source_id, start_idx, end_idx),
+        daemon=True
+    )
+    t.start()
+
+    return jsonify({"ok": True, "message": "已开始后台下载"})
+
+
+@app.route("/api/download/status/<path:novel_url>")
+@_json_login_required
+def api_download_status(novel_url):
+    with download_lock:
+        job = active_downloads.get(novel_url)
+    if not job:
+        return jsonify({"status": "idle"})
+    return jsonify(job)
+
+
+@app.route("/api/download/cancel", methods=["POST"])
+@_json_login_required
+def api_download_cancel():
+    data = request.json or {}
+    novel_url = data.get("url")
+    if not novel_url:
+        return jsonify({"error": "缺少小说 URL"}), 400
+
+    with download_lock:
+        job = active_downloads.get(novel_url)
+        if job and job.get("status") == "downloading":
+            job["cancel"] = True
+            job["status"] = "cancelling"
+            return jsonify({"ok": True, "message": "正在取消下载"})
+
+    return jsonify({"error": "没有正在进行的下载任务"}), 404
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
 
-    # 检查是否已配置密码
     if not _get_password_hash():
-        print("\n  ⚠️  警告：尚未设置访问密码！")
+        print("\n  [!] 警告：尚未设置访问密码！")
         print("  请先运行: python setup_password.py\n")
 
     print("\n  小说阅读器已启动（已启用访问保护）")

@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}小说阅读器{% endblock %}</title>
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0b0f19">
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -617,6 +623,10 @@
             小说阅读器
         </a>
         <nav>
+            <div id="offline-badge" class="badge badge-gold" style="display: none; align-items: center; gap: 0.3rem; line-height: 1; align-self: center; margin-right: 0.5rem; flex-shrink: 0;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="flex-shrink:0;"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                离线
+            </div>
             <a href="/" class="{% if request.path == '/' %}active{% endif %}">首页</a>
             <a href="/search" class="{% if request.path == '/search' %}active{% endif %}">搜索</a>
         </nav>
@@ -728,6 +738,32 @@
                 showToast('网络错误，移除失败', true);
             }
         }
+
+        // PWA Service Worker 注册与网络状态监听
+        function updateOnlineStatus() {
+            const badge = document.getElementById('offline-badge');
+            if (badge) {
+                if (navigator.onLine) {
+                    badge.style.display = 'none';
+                } else {
+                    badge.style.display = 'inline-flex';
+                    showToast('您已处于离线状态，可继续阅读本地缓存过的章节', false);
+                }
+            }
+        }
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        
+        window.addEventListener('load', () => {
+            updateOnlineStatus();
+            
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('Service Worker 注册成功:', reg.scope))
+                    .catch(err => console.error('Service Worker 注册失败:', err));
+            }
+        });
     </script>
     {% block scripts %}{% endblock %}
 </body>

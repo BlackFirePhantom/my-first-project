@@ -41,6 +41,10 @@
                 </svg>
                 更新目录
             </a>
+            <button id="btnBulkDownload" class="btn btn-secondary" onclick="openDownloadModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                批量下载
+            </button>
             <a href="/" class="btn btn-secondary">返回我的书架</a>
         </div>
     </div>
@@ -60,10 +64,78 @@
     {% for ch in chapters %}
     <a href="/read/{{ novel_url }}/{{ loop.index0 }}?source={{ source_id }}"
        class="chapter-item {% if loop.index0 == last_chapter %}current{% endif %}"
+       data-index="{{ loop.index0 }}"
        {% if loop.index0 == last_chapter %}id="currentChapterItem"{% endif %}>
-        <span class="num">{{ loop.index }}.</span> {{ ch.title }}
+        <span><span class="num">{{ loop.index }}.</span> {{ ch.title }}</span>
+        <span class="cache-status-icon" style="display:none; font-size: 0.82rem; color: var(--green); filter: drop-shadow(0 0 2px rgba(16,185,129,0.3));" title="已缓存至服务器">☁️</span>
     </a>
     {% endfor %}
+</div>
+
+<!-- 下载控制模态框 -->
+<div id="downloadModal" class="download-modal">
+    <div class="download-modal-content">
+        <span class="close-modal" onclick="closeDownloadModal()">&times;</span>
+        <h2>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" style="vertical-align: middle; margin-right: 0.4rem; display: inline-block;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            批量下载章节
+        </h2>
+        
+        <div class="download-options">
+            <label class="download-opt-card active" id="cardUncached" onclick="selectDownloadOption('uncached')">
+                <input type="radio" name="downloadType" id="optUncached" value="uncached" checked style="display:none;">
+                <div class="opt-title">下载未缓存章节</div>
+                <div class="opt-desc" id="uncachedCountText">正在计算缓存状态...</div>
+            </label>
+            
+            <label class="download-opt-card" id="cardAll" onclick="selectDownloadOption('all')">
+                <input type="radio" name="downloadType" id="optAll" value="all" style="display:none;">
+                <div class="opt-title">下载全部章节</div>
+                <div class="opt-desc">共 {{ chapters|length }} 章</div>
+            </label>
+            
+            <label class="download-opt-card" id="cardRange" onclick="selectDownloadOption('range')">
+                <input type="radio" name="downloadType" id="optRange" value="range" style="display:none;">
+                <div class="opt-title">自定义章节范围</div>
+                <div class="range-inputs" onclick="event.stopPropagation()">
+                    <input type="number" id="rangeStart" min="1" max="{{ chapters|length }}" value="1">
+                    <span>至</span>
+                    <input type="number" id="rangeEnd" min="1" max="{{ chapters|length }}" value="{{ chapters|length }}">
+                </div>
+            </label>
+        </div>
+
+        <div class="sync-device-check">
+            <label class="checkbox-container">
+                <input type="checkbox" id="syncToDevice" checked>
+                <span class="checkmark"></span>
+                同时同步至本地设备（支持离线阅读）
+            </label>
+        </div>
+
+        <!-- 进度展示区 -->
+        <div id="downloadProgressArea" class="progress-area" style="display:none;">
+            <div class="progress-status-row">
+                <span id="progressStatusText">正在准备下载...</span>
+                <span id="progressPercentText">0%</span>
+            </div>
+            <div class="progress-bar-container">
+                <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div id="syncProgressText" style="font-size:0.8rem; color:var(--text-dim); margin-top:0.4rem; display:none;">
+                设备同步进度：<span id="syncCurrent">0</span> / <span id="syncTotal">0</span> 章
+            </div>
+        </div>
+
+        <div class="modal-actions" id="modalActions">
+            <button class="btn btn-secondary" onclick="closeDownloadModal()">关闭</button>
+            <button class="btn btn-primary" onclick="startDownload()">开始下载</button>
+        </div>
+        
+        <div class="modal-actions" id="modalProgressActions" style="display:none;">
+            <button class="btn btn-ghost" id="btnCancelDownload" onclick="cancelDownload()">取消下载</button>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -167,61 +239,501 @@
             padding: 0.65rem 1.0rem !important;
         }
     }
+    .chapter-item {
+        display: flex !important;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    /* ── 下载模态框样式 ── */
+    .download-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(11, 15, 25, 0.75);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        z-index: 250;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    .download-modal.show {
+        display: flex;
+        opacity: 1;
+    }
+    .download-modal-content {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 2rem;
+        width: 100%;
+        max-width: 480px;
+        box-shadow: var(--shadow-lg);
+        position: relative;
+        transform: scale(0.92);
+        transition: transform 0.3s ease;
+    }
+    .download-modal.show .download-modal-content {
+        transform: scale(1);
+    }
+    .close-modal {
+        position: absolute;
+        top: 1rem;
+        right: 1.5rem;
+        font-size: 1.8rem;
+        color: var(--text-dim);
+        cursor: pointer;
+        transition: color 0.2s;
+        line-height: 1;
+    }
+    .close-modal:hover {
+        color: var(--text);
+    }
+    .download-options {
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+        margin-top: 1.2rem;
+        margin-bottom: 1.2rem;
+    }
+    .download-opt-card {
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 0.9rem 1.2rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: block;
+    }
+    .download-opt-card:hover {
+        background: rgba(255,255,255,0.05);
+        border-color: rgba(99, 102, 241, 0.2);
+    }
+    .download-opt-card.active {
+        background: rgba(99, 102, 241, 0.08);
+        border-color: var(--accent);
+        box-shadow: 0 0 10px rgba(99, 102, 241, 0.1);
+    }
+    .download-opt-card .opt-title {
+        font-weight: 700;
+        font-size: 0.95rem;
+        color: var(--text);
+        margin-bottom: 0.2rem;
+    }
+    .download-opt-card .opt-desc {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+    }
+    .range-inputs {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .range-inputs input {
+        background: rgba(0,0,0,0.25);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.25rem 0.5rem;
+        color: var(--text);
+        width: 80px;
+        text-align: center;
+        font-size: 0.85rem;
+        outline: none;
+    }
+    .range-inputs input:focus {
+        border-color: var(--accent);
+    }
+    .range-inputs span {
+        color: var(--text-dim);
+        font-size: 0.85rem;
+    }
+    
+    /* Checkbox Styles */
+    .sync-device-check {
+        margin-bottom: 1.5rem;
+    }
+    .checkbox-container {
+        display: flex;
+        align-items: center;
+        position: relative;
+        padding-left: 1.8rem;
+        cursor: pointer;
+        font-size: 0.88rem;
+        color: var(--text);
+        user-select: none;
+    }
+    .checkbox-container input {
+        position: absolute;
+        opacity: 0;
+        cursor: pointer;
+        height: 0;
+        width: 0;
+    }
+    .checkmark {
+        position: absolute;
+        top: 0.1rem;
+        left: 0;
+        height: 18px;
+        width: 18px;
+        background-color: rgba(255,255,255,0.03);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        transition: all 0.2s;
+    }
+    .checkbox-container:hover input ~ .checkmark {
+        background-color: rgba(255,255,255,0.08);
+    }
+    .checkbox-container input:checked ~ .checkmark {
+        background-color: var(--accent);
+        border-color: var(--accent);
+    }
+    .checkmark:after {
+        content: "";
+        position: absolute;
+        display: none;
+    }
+    .checkbox-container input:checked ~ .checkmark:after {
+        display: block;
+    }
+    .checkbox-container .checkmark:after {
+        left: 6px;
+        top: 2px;
+        width: 4px;
+        height: 8px;
+        border: solid white;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+    }
+    
+    /* Progress styling */
+    .progress-area {
+        background: rgba(0,0,0,0.2);
+        border-radius: var(--radius-sm);
+        padding: 1.2rem;
+        border: 1px solid var(--border);
+        margin-bottom: 1.5rem;
+    }
+    .progress-status-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.88rem;
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+    }
+    .progress-bar-container {
+        height: 8px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: var(--accent-gradient);
+        border-radius: 4px;
+        width: 0%;
+        transition: width 0.2s ease;
+        box-shadow: 0 0 8px var(--accent-glow);
+    }
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.8rem;
+    }
 </style>
 {% endblock %}
 
-{% block scripts %}
-<script>
-    // 哈希渐变生成
-    const colors = [
-        ['#3b82f6', '#1d4ed8'],
-        ['#10b981', '#047857'],
-        ['#8b5cf6', '#6d28d9'],
-        ['#ec4899', '#be185d'],
-        ['#f59e0b', '#b45309'],
-        ['#ef4444', '#b91c1c'],
-        ['#06b6d4', '#0891b2']
-    ];
+    // ── 缓存状态与批量下载逻辑 ──
+    const NOVEL_URL = {{ novel_url | tojson }};
+    const SOURCE_ID = {{ source_id | tojson }};
+    const TOTAL_CHAPTERS = {{ chapters|length }};
+    
+    let isDownloading = false;
+    let pollInterval = null;
+    let cachedList = [];
 
-    function getGradientByName(name) {
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    // 页面载入时和操作完成后查询服务器缓存状态
+    async function checkCacheStatus() {
+        try {
+            const resp = await fetch(`/api/novel/cache_status/${encodeURIComponent(NOVEL_URL)}?source=${SOURCE_ID}`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            cachedList = data.cached;
+            
+            let uncachedCount = 0;
+            cachedList.forEach((isCached, i) => {
+                const item = document.querySelector(`.chapter-item[data-index="${i}"]`);
+                if (item) {
+                    const cloud = item.querySelector('.cache-status-icon');
+                    if (isCached) {
+                        if (cloud) cloud.style.display = 'inline';
+                    } else {
+                        if (cloud) cloud.style.display = 'none';
+                        uncachedCount++;
+                    }
+                }
+            });
+
+            const desc = document.getElementById('uncachedCountText');
+            if (desc) {
+                desc.textContent = `共 ${uncachedCount} 个章节未缓存`;
+            }
+            
+            // 如果已经在下载，恢复 UI
+            checkActiveDownload();
+        } catch (e) {
+            console.error('获取缓存状态失败:', e);
         }
-        const idx = Math.abs(hash) % colors.length;
-        return `linear-gradient(135deg, ${colors[idx][0]} 0%, ${colors[idx][1]} 100%)`;
     }
 
-    const heroCover = document.getElementById('novelCoverHero');
-    if (heroCover) {
-        heroCover.style.background = getGradientByName('{{ novel_name }}');
+    // 检测是否有正在进行的下载任务
+    async function checkActiveDownload() {
+        try {
+            const resp = await fetch(`/api/download/status/${encodeURIComponent(NOVEL_URL)}`);
+            const data = await resp.json();
+            if (data.status === 'downloading') {
+                isDownloading = true;
+                showProgressUI();
+                startPolling();
+            }
+        } catch (e) {
+            console.error('检测活跃下载失败:', e);
+        }
     }
 
-    // 目录精细导航定位
-    function scrollToChapter(pos) {
-        const grid = document.getElementById('chapterGrid');
-        if (!grid) return;
+    function openDownloadModal() {
+        const modal = document.getElementById('downloadModal');
+        if (modal) {
+            modal.classList.add('show');
+            checkCacheStatus();
+        }
+    }
+
+    function closeDownloadModal() {
+        if (isDownloading) {
+            if (!confirm('正在下载中，确定要关闭窗口吗？（下载将在后台继续运行）')) return;
+        }
+        const modal = document.getElementById('downloadModal');
+        if (modal) {
+            modal.classList.remove('show');
+        }
+    }
+
+    function selectDownloadOption(type) {
+        if (isDownloading) return;
         
-        if (pos === 'start') {
-            grid.scrollTo({ top: 0, behavior: 'smooth' });
-        } else if (pos === 'end') {
-            grid.scrollTo({ top: grid.scrollHeight, behavior: 'smooth' });
-        } else if (pos === 'current') {
-            const currentItem = document.getElementById('currentChapterItem');
-            if (currentItem) {
-                currentItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        ['uncached', 'all', 'range'].forEach(t => {
+            const card = document.getElementById(`card${t.charAt(0).toUpperCase() + t.slice(1)}`);
+            if (card) card.classList.toggle('active', t === type);
+        });
+
+        document.getElementById('optUncached').checked = (type === 'uncached');
+        document.getElementById('optAll').checked = (type === 'all');
+        document.getElementById('optRange').checked = (type === 'range');
+    }
+
+    function showProgressUI() {
+        document.getElementById('downloadProgressArea').style.display = 'block';
+        document.getElementById('modalActions').style.display = 'none';
+        document.getElementById('modalProgressActions').style.display = 'flex';
+        // 禁用选项点击
+        document.querySelectorAll('.download-opt-card').forEach(c => c.style.pointerEvents = 'none');
+    }
+
+    function hideProgressUI() {
+        document.getElementById('downloadProgressArea').style.display = 'none';
+        document.getElementById('modalActions').style.display = 'flex';
+        document.getElementById('modalProgressActions').style.display = 'none';
+        document.querySelectorAll('.download-opt-card').forEach(c => c.style.pointerEvents = 'auto');
+        document.getElementById('progressBarFill').style.width = '0%';
+        document.getElementById('progressPercentText').textContent = '0%';
+        document.getElementById('syncProgressText').style.display = 'none';
+    }
+
+    async function startDownload() {
+        if (isDownloading) return;
+
+        let startIdx = 0;
+        let endIdx = TOTAL_CHAPTERS - 1;
+
+        const downloadType = document.querySelector('input[name="downloadType"]:checked').value;
+        if (downloadType === 'uncached') {
+            // 找出第一个和最后一个未缓存章节，服务器下载过程中会自动跳过已缓存的文件
+            const firstUncached = cachedList.indexOf(false);
+            const lastUncached = cachedList.lastIndexOf(false);
+            if (firstUncached === -1) {
+                showToast('所有章节均已缓存成功！');
+                return;
             }
+            startIdx = firstUncached;
+            endIdx = lastUncached;
+        } else if (downloadType === 'range') {
+            const startVal = parseInt(document.getElementById('rangeStart').value) - 1;
+            const endVal = parseInt(document.getElementById('rangeEnd').value) - 1;
+            if (isNaN(startVal) || isNaN(endVal) || startVal < 0 || endVal >= TOTAL_CHAPTERS || startVal > endVal) {
+                showToast('请输入合法的章节范围', true);
+                return;
+            }
+            startIdx = startVal;
+            endIdx = endVal;
+        }
+
+        try {
+            const resp = await fetch('/api/download/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: NOVEL_URL,
+                    source: SOURCE_ID,
+                    start_idx: startIdx,
+                    end_idx: endIdx
+                })
+            });
+            if (resp.ok) {
+                isDownloading = true;
+                showProgressUI();
+                startPolling(startIdx, endIdx);
+            } else {
+                const data = await resp.json();
+                showToast(data.error || '开启下载失败', true);
+            }
+        } catch (e) {
+            showToast('请求下载出错，请重试', true);
         }
     }
 
-    // 页面加载完毕自动滚动定位到当前已读章节
-    window.addEventListener('load', () => {
-        setTimeout(() => {
-            const currentItem = document.getElementById('currentChapterItem');
-            if (currentItem) {
-                currentItem.scrollIntoView({ block: 'center' });
+    function startPolling(startIdx, endIdx) {
+        if (pollInterval) clearInterval(pollInterval);
+        
+        pollInterval = setInterval(async () => {
+            try {
+                const resp = await fetch(`/api/download/status/${encodeURIComponent(NOVEL_URL)}`);
+                const data = await resp.json();
+                
+                if (data.status === 'downloading') {
+                    const downloaded = data.downloaded || 0;
+                    const total = data.total || 1;
+                    const pct = Math.floor((downloaded / total) * 100);
+                    
+                    document.getElementById('progressBarFill').style.width = pct + '%';
+                    document.getElementById('progressPercentText').textContent = pct + '%';
+                    document.getElementById('progressStatusText').textContent = `正在下载：已完成 ${downloaded} / ${total} 章`;
+                } else if (data.status === 'completed') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    isDownloading = false;
+                    
+                    // 确定同步范围
+                    let finalStart = startIdx !== undefined ? startIdx : 0;
+                    let finalEnd = endIdx !== undefined ? endIdx : TOTAL_CHAPTERS - 1;
+                    
+                    if (document.getElementById('syncToDevice').checked) {
+                        syncToLocalDevice(finalStart, finalEnd);
+                    } else {
+                        document.getElementById('progressBarFill').style.width = '100%';
+                        document.getElementById('progressPercentText').textContent = '100%';
+                        document.getElementById('progressStatusText').textContent = '🎉 下载完成！';
+                        showToast('全部章节下载并缓存成功！');
+                        checkCacheStatus();
+                        setTimeout(() => {
+                            hideProgressUI();
+                            closeDownloadModal();
+                        }, 1500);
+                    }
+                } else if (data.status === 'failed' || data.status === 'cancelled') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    isDownloading = false;
+                    showToast(data.error || '下载已被取消', true);
+                    hideProgressUI();
+                    checkCacheStatus();
+                }
+            } catch (e) {
+                console.error('轮询下载状态出错:', e);
             }
-        }, 100);
+        }, 1000);
+    }
+
+    async function cancelDownload() {
+        if (!confirm('确定要取消当前的下载任务吗？')) return;
+        try {
+            const resp = await fetch('/api/download/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: NOVEL_URL })
+            });
+            if (resp.ok) {
+                showToast('正在终止下载...');
+            }
+        } catch (e) {
+            showToast('取消下载失败', true);
+        }
+    }
+
+    // ── 将服务端已缓存的内容拉取至本地浏览器 (PWA Cache Storage) ──
+    async function syncToLocalDevice(start, end) {
+        document.getElementById('syncProgressText').style.display = 'block';
+        
+        // 过滤出未缓存至本地的网页（或者对整个范围重新拉取以确保覆盖）
+        const chaptersToSync = [];
+        for (let i = start; i <= end; i++) {
+            chaptersToSync.push({
+                idx: i,
+                url: `/read/${encodeURIComponent(NOVEL_URL)}/${i}?source=${SOURCE_ID}`
+            });
+        }
+        
+        const total = chaptersToSync.length;
+        document.getElementById('syncTotal').textContent = total;
+        document.getElementById('syncCurrent').textContent = 0;
+        document.getElementById('progressBarFill').style.width = '0%';
+        document.getElementById('progressPercentText').textContent = '0%';
+        document.getElementById('progressStatusText').textContent = `正在同步至设备：已完成 0 / ${total} 章`;
+
+        let completed = 0;
+        const limit = 3; // 并发页面请求限制，避免浏览器卡死
+
+        async function worker() {
+            while (chaptersToSync.length > 0) {
+                const ch = chaptersToSync.shift();
+                if (!ch) break;
+                
+                try {
+                    // 发起 fetch，Service Worker 会自动拦截并写入 Cache Storage
+                    await fetch(ch.url);
+                } catch (e) {
+                    console.error('同步单章失败:', ch.idx, e);
+                }
+                
+                completed++;
+                document.getElementById('syncCurrent').textContent = completed;
+                const pct = Math.floor((completed / total) * 100);
+                document.getElementById('progressBarFill').style.width = pct + '%';
+                document.getElementById('progressPercentText').textContent = pct + '%';
+                document.getElementById('progressStatusText').textContent = `同步至设备：已完成 ${completed} / ${total} 章`;
+            }
+        }
+
+        // 启动并发协程
+        const workers = Array(Math.min(limit, chaptersToSync.length)).fill(null).map(() => worker());
+        await Promise.all(workers);
+
+        document.getElementById('progressStatusText').textContent = '🎉 设备本地同步已完成！';
+        showToast('本地离线包同步成功！');
+        checkCacheStatus();
+        
+        setTimeout(() => {
+            hideProgressUI();
+            closeDownloadModal();
+        }, 1500);
+    }
+
+    // 页面载入时自动检测
+    window.addEventListener('DOMContentLoaded', () => {
+        checkCacheStatus();
     });
 </script>
 {% endblock %}

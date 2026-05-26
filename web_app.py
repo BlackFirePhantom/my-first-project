@@ -66,7 +66,7 @@ download_lock = threading.Lock()
 
 
 def _download_novel_task(novel_url, source_id, start_idx, end_idx):
-    source = _get_source(source_id)
+    source = _get_source(source_id, url=novel_url)
     try:
         chapters = source.get_chapters(novel_url)
     except Exception as e:
@@ -205,8 +205,12 @@ def _find_shelf_key(shelf: dict, url: str) -> str | None:
     return None
 
 
-def _get_source(source_id: str = None):
-    """获取指定源，不指定则返回默认源"""
+def _get_source(source_id: str = None, url: str = None):
+    """获取指定源，优先根据 url 匹配，其次根据 source_id，最后返回默认源"""
+    if url:
+        mod = registry.get_by_url(url)
+        if mod:
+            return mod
     if source_id:
         mod = registry.get(source_id)
         if mod:
@@ -225,17 +229,28 @@ def _all_sources():
 def index():
     shelf = load_bookshelf()
     novels = []
+    changed = False
     for url, info in shelf.items():
+        source_id = info.get("source", "")
+        # 自动通过 URL 域名匹配正确的书源并修复
+        matched_id = registry.get_id_by_url(url)
+        if matched_id and matched_id != source_id:
+            info["source"] = matched_id
+            source_id = matched_id
+            changed = True
+
         novels.append({
             "name": info.get("name", "未知"),
             "url": url,
-            "source": info.get("source", ""),
+            "source": source_id,
             "cover": info.get("cover", ""),
             "last_chapter": info.get("last_chapter", 0),
             "last_title": info.get("last_title", ""),
             "total_chapters": info.get("total_chapters", 0),
             "last_read_time": info.get("last_read_time", 0),
         })
+    if changed:
+        save_bookshelf(shelf)
     # 按最后点击/阅读时间从新到旧排序
     novels.sort(key=lambda x: x["last_read_time"], reverse=True)
     return render_template("index.html", novels=novels, sources=_all_sources())
@@ -312,7 +327,13 @@ def search():
 def novel_detail(novel_url):
     full_url = novel_url
     source_id = request.args.get("source", "")
-    source = _get_source(source_id)
+    source = _get_source(source_id, url=full_url)
+    
+    # 动态同步匹配的实际书源 ID
+    matched_id = registry.get_id_by_url(full_url)
+    if matched_id:
+        source_id = matched_id
+
     force_refresh = request.args.get("refresh", "") == "1"
 
     try:
@@ -399,6 +420,7 @@ def novel_detail(novel_url):
             shelf[shelf_key]["name"] = novel_name
         if cover_url:
             shelf[shelf_key]["cover"] = cover_url
+        shelf[shelf_key]["source"] = source_id
         shelf[shelf_key]["last_read_time"] = time.time()
         save_bookshelf(shelf)
 
@@ -425,7 +447,12 @@ def read_chapter(novel_url, chapter_idx):
     if shelf_key and not source_id:
         source_id = shelf[shelf_key].get("source", "")
 
-    source = _get_source(source_id)
+    source = _get_source(source_id, url=full_url)
+    
+    # 动态匹配并更新实际书源 ID
+    matched_id = registry.get_id_by_url(full_url)
+    if matched_id:
+        source_id = matched_id
 
     try:
         chapters = source.get_chapters(full_url)
@@ -457,6 +484,7 @@ def read_chapter(novel_url, chapter_idx):
 
         shelf[shelf_key]["last_chapter"] = chapter_idx
         shelf[shelf_key]["last_title"] = ch["title"]
+        shelf[shelf_key]["source"] = source_id
         shelf[shelf_key]["last_read_time"] = time.time()
         save_bookshelf(shelf)
 
@@ -556,7 +584,7 @@ def service_worker():
 @_json_login_required
 def api_novel_cache_status(novel_url):
     source_id = request.args.get("source", "")
-    source = _get_source(source_id)
+    source = _get_source(source_id, url=novel_url)
     try:
         chapters = source.get_chapters(novel_url)
     except Exception as e:

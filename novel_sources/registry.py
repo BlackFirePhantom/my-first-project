@@ -34,6 +34,9 @@ def _discover():
             _sources[module_name] = mod
             _source_list.append((module_name, display_name))
 
+    # 按模块名按字母顺序排序，确保在所有平台上的默认源一致
+    _source_list.sort(key=lambda x: x[0])
+
 
 def get_all() -> list[tuple[str, str]]:
     """返回所有可用源 [(id, display_name), ...]"""
@@ -53,3 +56,37 @@ def get_default():
     if _source_list:
         return _sources[_source_list[0][0]]
     return None
+
+
+def get_by_url(url: str):
+    """根据 URL 域名匹配对应的源模块"""
+    _discover()
+    if not url:
+        return None
+    from urllib.parse import urlparse
+    try:
+        url_domain = urlparse(url).netloc.lower()
+    except Exception:
+        return None
+    for source_id, mod in _sources.items():
+        base_url = getattr(mod, "BASE_URL", "")
+        if base_url:
+            try:
+                mod_domain = urlparse(base_url).netloc.lower()
+                if mod_domain and (mod_domain in url_domain or url_domain in mod_domain):
+                    return mod
+            except Exception:
+                continue
+    return None
+
+
+def get_id_by_url(url: str) -> str | None:
+    """根据 URL 域名获取匹配的源 ID"""
+    _discover()
+    mod = get_by_url(url)
+    if mod:
+        for sid, m in _sources.items():
+            if m == mod:
+                return sid
+    return None
+

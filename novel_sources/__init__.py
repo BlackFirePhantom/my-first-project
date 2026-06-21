@@ -5,9 +5,9 @@ import requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 共享请求配置
-DEFAULT_TIMEOUT = 30
-MAX_RETRIES = 3
-RETRY_DELAY = 2
+DEFAULT_TIMEOUT = 10
+MAX_RETRIES = 2
+RETRY_DELAY = 1
 
 
 def robust_get(url: str, headers: dict = None, timeout: int = DEFAULT_TIMEOUT,

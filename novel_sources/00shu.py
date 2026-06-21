@@ -78,7 +78,7 @@ def search(keyword: str) -> list[dict]:
         "searchkey": keyword,
         "type": "articlename"
     }
-    resp = robust_post(f"{BASE_URL}/s.php", data=data, headers=HEADERS)
+    resp = robust_post(f"{BASE_URL}/s.php", data=data, headers=HEADERS, timeout=8, retries=1)
     resp.encoding = "utf-8"
     soup = _parse(resp.text)
 

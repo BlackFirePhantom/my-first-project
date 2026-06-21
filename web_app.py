@@ -11,7 +11,7 @@ import os
 import secrets
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from functools import wraps
 from pathlib import Path
 
@@ -326,16 +326,21 @@ def search():
                     executor.submit(fetch_search, sid, sname): (sid, sname)
                     for sid, sname in all_sources
                 }
-                for future in as_completed(future_to_source):
-                    sid, sname = future_to_source[future]
-                    try:
-                        res, err = future.result()
-                        if res:
-                            results.extend(res)
-                        if err:
-                            errors.append(err)
-                    except Exception as e:
-                        errors.append(f"【{sname}】错误: {e}")
+                try:
+                    for future in as_completed(future_to_source, timeout=10.0):
+                        sid, sname = future_to_source[future]
+                        try:
+                            res, err = future.result()
+                            if res:
+                                results.extend(res)
+                            if err:
+                                errors.append(err)
+                        except Exception as e:
+                            errors.append(f"【{sname}】错误: {e}")
+                except TimeoutError:
+                    for future, (sid, sname) in future_to_source.items():
+                        if not future.done():
+                            errors.append(f"【{sname}】搜索超时")
             if errors and not results:
                 error = " | ".join(errors)
 

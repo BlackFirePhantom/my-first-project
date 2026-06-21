@@ -24,7 +24,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from novel_sources import cache, robust_get
+from novel_sources import cache, robust_get, robust_post
 
 NAME = "00小说网"
 BASE_URL = "https://m.00shu.la"
@@ -74,7 +74,11 @@ def _find_next_page(soup: BeautifulSoup) -> str | None:
 # ── 搜索 ──────────────────────────────────────────────
 def search(keyword: str) -> list[dict]:
     """搜索小说，返回 [{name, author, url}, ...]"""
-    resp = robust_get(f"{BASE_URL}/s.php", params={"searchkey": keyword}, headers=HEADERS)
+    data = {
+        "searchkey": keyword,
+        "type": "articlename"
+    }
+    resp = robust_post(f"{BASE_URL}/s.php", data=data, headers=HEADERS)
     resp.encoding = "utf-8"
     soup = _parse(resp.text)
 

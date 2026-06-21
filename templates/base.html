@@ -759,8 +759,19 @@
             updateOnlineStatus();
             
             if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('Service Worker 注册成功:', reg.scope))
+                let refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (!refreshing) {
+                        window.location.reload();
+                        refreshing = true;
+                    }
+                });
+
+                navigator.serviceWorker.register('/sw.js?v=2')
+                    .then(reg => {
+                        console.log('Service Worker 注册成功:', reg.scope);
+                        reg.update();
+                    })
                     .catch(err => console.error('Service Worker 注册失败:', err));
             }
         });

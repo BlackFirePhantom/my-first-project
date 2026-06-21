@@ -61,6 +61,15 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=7 * 24 * 3600,  # Session 有效期 7 天
 )
 
+# 禁用 HTML 页面浏览器缓存，防止加载旧页面/旧 JS 导致功能失效
+@app.after_request
+def add_cache_control_headers(response):
+    if response.content_type and "text/html" in response.content_type:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 active_downloads = {}
 download_lock = threading.Lock()
 
@@ -182,15 +191,36 @@ def logout():
     return redirect(url_for("login"))
 
 
+bookshelf_lock = threading.Lock()
+
 # ── 工具 ──────────────────────────────────────────────
 def load_bookshelf() -> dict:
-    if BOOKSHELF_FILE.exists():
-        return json.loads(BOOKSHELF_FILE.read_text("utf-8"))
-    return {}
+    with bookshelf_lock:
+        if BOOKSHELF_FILE.exists():
+            try:
+                content = BOOKSHELF_FILE.read_text("utf-8")
+                if content.strip():
+                    return json.loads(content)
+            except json.JSONDecodeError:
+                # 若文件因并发问题处于空状态或损坏，安全返回空字典，防止崩溃
+                pass
+        return {}
 
 
 def save_bookshelf(data: dict):
-    BOOKSHELF_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+    with bookshelf_lock:
+        # 使用“写入临时文件+原子性重命名”的机制，彻底杜绝写文件时的文件截断/并发读空冲突
+        temp_file = BOOKSHELF_FILE.with_suffix(".tmp")
+        try:
+            temp_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+            os.replace(temp_file, BOOKSHELF_FILE)
+        except Exception as e:
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+            raise e
 
 
 def _find_shelf_key(shelf: dict, url: str) -> str | None:
@@ -576,7 +606,12 @@ def manifest():
 
 @app.route("/sw.js")
 def service_worker():
-    return render_template("sw.js"), 200, {"Content-Type": "application/javascript"}
+    return render_template("sw.js"), 200, {
+        "Content-Type": "application/javascript",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
 
 
 # ── 批量下载 API ──────────────────────────────────────

@@ -27,6 +27,9 @@
         {% endfor %}
     </div>
 
+    <!-- 页面进度指示器 (仅在左右翻页模式下显示) -->
+    <div class="page-indicator" id="pageIndicator">页码 1 / 1</div>
+
     <!-- 底部导航 -->
     <div class="reader-nav">
         {% if chapter_idx > 0 %}
@@ -65,6 +68,15 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         个性化阅读设置
     </h3>
+
+    <!-- 选项零：阅读模式 -->
+    <div class="setting-row">
+        <div class="setting-label">阅读模式</div>
+        <div class="font-selector">
+            <button class="font-btn" id="modeScrollBtn" data-mode="scroll">上下滚动</button>
+            <button class="font-btn" id="modePagingBtn" data-mode="paging">左右翻页</button>
+        </div>
+    </div>
 
     <!-- 选项一：阅读主题 -->
     <div class="setting-row">
@@ -351,21 +363,148 @@
             margin-bottom: 1rem !important;
         }
     }
+
+    /* ── 左右翻页模式的核心样式 ── */
+    .page-indicator {
+        display: none;
+        text-align: center;
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin: 0.6rem 0;
+        font-weight: 500;
+        user-select: none;
+    }
+    
+    body.reader-paging-active {
+        overflow: hidden !important;
+        height: 100vh !important;
+        width: 100vw !important;
+    }
+    
+    body.reader-paging-active .scroll-progress-bar {
+        display: none !important;
+    }
+    
+    body.reader-paging-active .navbar {
+        display: none !important; /* 隐藏全局顶栏 */
+    }
+    
+    body.reader-paging-active .container {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100vh !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    body.reader-paging-active .reader-container {
+        max-width: var(--reader-width) !important;
+        width: 100% !important;
+        height: 100vh !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        background: var(--bg-card);
+    }
+    
+    body.reader-paging-active .reader-header {
+        height: 60px !important;
+        margin: 0 !important;
+        padding: 10px 20px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        border-bottom: 1px solid var(--border) !important;
+        flex-shrink: 0 !important;
+    }
+    
+    body.reader-paging-active .reader-header h1.chapter-title {
+        font-size: 1.1rem !important;
+        margin: 0 !important;
+    }
+    
+    body.reader-paging-active .reader-header .novel-name {
+        font-size: 0.9rem !important;
+        margin: 0 !important;
+    }
+    
+    body.reader-paging-active .reader-header .chapter-meta {
+        font-size: 0.85rem !important;
+        margin: 0 !important;
+    }
+    
+    body.reader-paging-active .reader-body {
+        height: calc(100vh - 120px) !important;
+        margin: 0 !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        
+        /* 左右分栏 */
+        column-count: 1 !important;
+        column-gap: 4rem !important;
+        column-fill: auto !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        scrollbar-width: none !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        padding-top: 1.5rem !important;
+        padding-bottom: 1.5rem !important;
+        position: relative !important;
+    }
+    
+    body.reader-paging-active .reader-body::-webkit-scrollbar {
+        display: none !important;
+    }
+    
+    body.reader-paging-active .page-indicator {
+        display: block !important;
+    }
+    
+    body.reader-paging-active .reader-nav {
+        height: 60px !important;
+        margin: 0 !important;
+        padding: 10px 20px !important;
+        border-top: 1px solid var(--border) !important;
+        flex-shrink: 0 !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        gap: 0.5rem !important;
+    }
+    
+    body.reader-paging-active .reader-nav .btn, 
+    body.reader-paging-active .reader-nav .badge {
+        width: auto !important;
+        padding: 0.45rem 0.9rem !important;
+        font-size: 0.85rem !important;
+        margin: 0 !important;
+        display: inline-flex !important;
+    }
+    
+    body.reader-paging-active .reader-nav .center-btns {
+        grid-column: auto !important;
+        display: flex !important;
+        grid-template-columns: none !important;
+        gap: 0.5rem !important;
+        width: auto !important;
+    }
+    
+    body.reader-paging-active .reader-nav .center-btns .btn {
+        padding: 0.45rem 0.8rem !important;
+        font-size: 0.82rem !important;
+    }
+</style>
 </style>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // ── 滚动进度条监听 ──
-    window.addEventListener('scroll', function() {
-        const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
-        const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-        const scrolled = (winScroll / height) * 100;
-        document.getElementById('scrollProgress').style.width = scrolled + '%';
-    });
-
-    // ── 阅读设置持久化 ──
+    // ── 阅读设置持久化与早期初始化 ──
     const SETTINGS_KEY = 'reader_custom_settings';
     const defaults = {
         theme: 'dark',
@@ -373,7 +512,8 @@
         fontSize: 18,
         lineHeight: 2.1,
         contentWidth: 780,
-        scrollSpeed: 3
+        scrollSpeed: 3,
+        pagingMode: false
     };
 
     function loadSettings() {
@@ -386,43 +526,99 @@
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     }
 
+    const settings = loadSettings();
+    let currentPage = 0;
+    let totalPages = 1;
+    let pageScrollTimeout = null;
+    let autoScrollInterval = null;
+    let isAutoScrolling = false;
+
+    // ── 滚动进度条监听 ──
+    window.addEventListener('scroll', function() {
+        if (!settings || settings.pagingMode) return;
+        const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+        const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+        const scrolled = (winScroll / height) * 100;
+        const progressEl = document.getElementById('scrollProgress');
+        if (progressEl) {
+            progressEl.style.width = scrolled + '%';
+        }
+    });
+
     function applySettings(s) {
+        if (!s) return;
         const body = document.body;
         const root = document.documentElement;
         
         // 应用主题
-        body.setAttribute('data-theme', s.theme);
-        document.querySelectorAll('.theme-opt').forEach(opt => {
-            opt.classList.toggle('active', opt.getAttribute('data-theme') === s.theme);
-        });
+        if (s.theme) {
+            body.setAttribute('data-theme', s.theme);
+            document.querySelectorAll('.theme-opt').forEach(opt => {
+                opt.classList.toggle('active', opt.getAttribute('data-theme') === s.theme);
+            });
+        }
 
         // 应用字体
-        body.setAttribute('data-font', s.font);
-        document.querySelectorAll('.font-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.getAttribute('data-font') === s.font);
-        });
+        if (s.font) {
+            body.setAttribute('data-font', s.font);
+            document.querySelectorAll('.font-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-font') === s.font);
+            });
+        }
+
+        // 应用模式 (滚动 VS 翻页)
+        const content = document.getElementById('content');
+        const modePagingBtnEl = document.getElementById('modePagingBtn');
+        const modeScrollBtnEl = document.getElementById('modeScrollBtn');
+        const btnAutoScroll = document.getElementById('btnAutoScroll');
+
+        if (s.pagingMode) {
+            body.classList.add('reader-paging-active');
+            if (modePagingBtnEl) modePagingBtnEl.classList.add('active');
+            if (modeScrollBtnEl) modeScrollBtnEl.classList.remove('active');
+            // 翻页模式下隐藏自动滚动设置
+            if (btnAutoScroll) {
+                const autoScrollRow = btnAutoScroll.closest('.setting-row');
+                if (autoScrollRow) autoScrollRow.style.display = 'none';
+            }
+            stopAutoScroll();
+        } else {
+            body.classList.remove('reader-paging-active');
+            if (modeScrollBtnEl) modeScrollBtnEl.classList.add('active');
+            if (modePagingBtnEl) modePagingBtnEl.classList.remove('active');
+            // 滚动模式下恢复自动滚动设置
+            if (btnAutoScroll) {
+                const autoScrollRow = btnAutoScroll.closest('.setting-row');
+                if (autoScrollRow) autoScrollRow.style.display = 'block';
+            }
+        }
 
         // 应用数值
-        root.style.setProperty('--reader-font-size', s.fontSize + 'px');
-        root.style.setProperty('--reader-line-height', s.lineHeight);
-        root.style.setProperty('--reader-width', s.contentWidth + 'px');
+        if (s.fontSize !== undefined) root.style.setProperty('--reader-font-size', s.fontSize + 'px');
+        if (s.lineHeight !== undefined) root.style.setProperty('--reader-line-height', s.lineHeight);
+        if (s.contentWidth !== undefined) root.style.setProperty('--reader-width', s.contentWidth + 'px');
     }
 
     function syncUI(s) {
-        document.getElementById('fontSizeVal').textContent = s.fontSize + 'px';
-        document.getElementById('fontSize').value = s.fontSize;
-
-        document.getElementById('lineHeightVal').textContent = s.lineHeight.toFixed(1);
-        document.getElementById('lineHeight').value = s.lineHeight;
-
-        document.getElementById('contentWidthVal').textContent = s.contentWidth + 'px';
-        document.getElementById('contentWidth').value = s.contentWidth;
-
-        document.getElementById('scrollSpeedVal').textContent = s.scrollSpeed;
-        document.getElementById('scrollSpeed').value = s.scrollSpeed;
+        if (!s) return;
+        const elVal = (id, val, isProp = false) => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (isProp) el.value = val;
+                else el.textContent = val;
+            }
+        };
+        elVal('fontSizeVal', s.fontSize + 'px');
+        elVal('fontSize', s.fontSize, true);
+        elVal('lineHeightVal', s.lineHeight.toFixed(1));
+        elVal('lineHeight', s.lineHeight, true);
+        elVal('contentWidthVal', s.contentWidth + 'px');
+        elVal('contentWidth', s.contentWidth, true);
+        elVal('scrollSpeedVal', s.scrollSpeed);
+        elVal('scrollSpeed', s.scrollSpeed, true);
     }
 
-    const settings = loadSettings();
+    // 执行应用与同步
     applySettings(settings);
     syncUI(settings);
 
@@ -430,80 +626,169 @@
     document.querySelectorAll('.theme-opt').forEach(opt => {
         opt.addEventListener('click', function(e) {
             e.stopPropagation();
-            settings.theme = this.getAttribute('data-theme');
-            applySettings(settings);
-            saveSettings(settings);
+            if (settings) {
+                settings.theme = this.getAttribute('data-theme');
+                applySettings(settings);
+                saveSettings(settings);
+            }
         });
     });
 
     // 2. 监听字体选择点击
     document.querySelectorAll('.font-btn').forEach(btn => {
+        // 排除模式切换按钮
+        if (btn.id === 'modeScrollBtn' || btn.id === 'modePagingBtn') return;
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
-            settings.font = this.getAttribute('data-font');
-            applySettings(settings);
-            saveSettings(settings);
+            if (settings) {
+                settings.font = this.getAttribute('data-font');
+                applySettings(settings);
+                saveSettings(settings);
+            }
         });
     });
 
-    // 3. 监听滑动条事件
-    ['fontSize', 'lineHeight', 'contentWidth'].forEach(key => {
-        document.getElementById(key).addEventListener('input', function() {
-            let val = parseFloat(this.value);
-            settings[key] = val;
-            applySettings(settings);
+    // 3. 监听模式切换点击
+    const modeScrollBtn = document.getElementById('modeScrollBtn');
+    if (modeScrollBtn) {
+        modeScrollBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!settings || !settings.pagingMode) return;
             
-            // 同步文字标签
-            const labelMap = {
-                fontSize: val + 'px',
-                lineHeight: val.toFixed(1),
-                contentWidth: val + 'px'
-            };
-            document.getElementById(key + 'Val').textContent = labelMap[key];
+            const currentIdx = getVisibleParagraphIdx();
+            settings.pagingMode = false;
+            applySettings(settings);
             saveSettings(settings);
+            
+            // 恢复滚动模式位置
+            setTimeout(() => {
+                const targetPara = document.querySelector(`.reader-para[data-idx="${currentIdx}"]`);
+                if (targetPara) {
+                    targetPara.scrollIntoView({ behavior: 'auto', block: 'start' });
+                }
+            }, 100);
         });
-    });
+    }
 
-    // 4. 重置按钮
-    document.getElementById('settingsReset').addEventListener('click', function(e) {
-        e.stopPropagation();
-        Object.assign(settings, defaults);
-        applySettings(settings);
-        syncUI(settings);
-        saveSettings(settings);
-        showToast('已恢复默认设置');
-    });
+    const modePagingBtn = document.getElementById('modePagingBtn');
+    if (modePagingBtn) {
+        modePagingBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!settings || settings.pagingMode) return;
+            
+            const currentIdx = getVisibleParagraphIdx();
+            settings.pagingMode = true;
+            applySettings(settings);
+            saveSettings(settings);
+            
+            // 恢复翻页模式位置并重新排版
+            setTimeout(() => {
+                const content = document.getElementById('content');
+                if (content) {
+                    const clientWidth = content.clientWidth;
+                    totalPages = Math.max(1, Math.ceil(content.scrollWidth / clientWidth));
+                    
+                    const targetPara = document.querySelector(`.reader-para[data-idx="${currentIdx}"]`);
+                    if (targetPara) {
+                        const rect = targetPara.getBoundingClientRect();
+                        const contentRect = content.getBoundingClientRect();
+                        const pageIdx = Math.floor((rect.left - contentRect.left) / clientWidth);
+                        goToPage(pageIdx, false);
+                    } else {
+                        updatePagingInfo();
+                    }
+                }
+            }, 150);
+        });
+    }
 
-    // 5. 设置控制面板显示切换
-    const panel = document.getElementById('settingsPanel');
-    const fabBtn = document.getElementById('settingsBtn');
-    
-    fabBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        panel.classList.toggle('open');
-    });
-    
-    document.addEventListener('click', function(e) {
-        if (panel.classList.contains('open') && !panel.contains(e.target) && e.target !== fabBtn) {
-            panel.classList.remove('open');
+    // 4. 监听滑动条事件
+    ['fontSize', 'lineHeight', 'contentWidth'].forEach(key => {
+        const slider = document.getElementById(key);
+        if (slider) {
+            slider.addEventListener('input', function() {
+                if (!settings) return;
+                let val = parseFloat(this.value);
+                settings[key] = val;
+                applySettings(settings);
+                
+                // 同步文字标签
+                const valLabel = document.getElementById(key + 'Val');
+                if (valLabel) {
+                    const labelMap = {
+                        fontSize: val + 'px',
+                        lineHeight: val.toFixed(1),
+                        contentWidth: val + 'px'
+                    };
+                    valLabel.textContent = labelMap[key];
+                }
+                saveSettings(settings);
+                
+                // 翻页模式下，字号宽度改变会导致排版重算，需要刷新当前页
+                if (settings.pagingMode) {
+                    setTimeout(() => {
+                        const content = document.getElementById('content');
+                        if (content) {
+                            totalPages = Math.max(1, Math.ceil(content.scrollWidth / content.clientWidth));
+                            goToPage(currentPage, false);
+                        }
+                    }, 100);
+                }
+            });
         }
     });
 
+    // 5. 重置按钮
+    const resetBtn = document.getElementById('settingsReset');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!settings) return;
+            Object.assign(settings, defaults);
+            applySettings(settings);
+            syncUI(settings);
+            saveSettings(settings);
+            showToast('已恢复默认设置');
+            
+            if (settings.pagingMode) {
+                updatePagingInfo();
+            }
+        });
+    }
+
+    // 6. 设置控制面板显示切换
+    const panel = document.getElementById('settingsPanel');
+    const fabBtn = document.getElementById('settingsBtn');
+    
+    if (fabBtn && panel) {
+        fabBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            panel.classList.toggle('open');
+        });
+        
+        document.addEventListener('click', function(e) {
+            if (panel.classList.contains('open') && !panel.contains(e.target) && e.target !== fabBtn) {
+                panel.classList.remove('open');
+            }
+        });
+    }
+
     // ── 自动滚屏机制 ──
-    let autoScrollInterval = null;
-    let isAutoScrolling = false;
 
     function startAutoScroll() {
         if (autoScrollInterval) clearInterval(autoScrollInterval);
-        const speed = settings.scrollSpeed || 3;
-        // 每 20ms 滚动一次，位移与速度正相关
+        const speed = settings ? (settings.scrollSpeed || 3) : 3;
         autoScrollInterval = setInterval(() => {
             window.scrollBy(0, speed / 4);
         }, 20);
         
-        document.getElementById('btnAutoScroll').textContent = '暂停';
-        document.getElementById('btnAutoScroll').classList.add('active');
-        document.getElementById('autoScrollSpeedRow').style.display = 'block';
+        const btn = document.getElementById('btnAutoScroll');
+        if (btn) {
+            btn.textContent = '暂停';
+            btn.classList.add('active');
+        }
+        const speedRow = document.getElementById('autoScrollSpeedRow');
+        if (speedRow) speedRow.style.display = 'block';
         isAutoScrolling = true;
     }
 
@@ -512,34 +797,48 @@
             clearInterval(autoScrollInterval);
             autoScrollInterval = null;
         }
-        document.getElementById('btnAutoScroll').textContent = '开启';
-        document.getElementById('btnAutoScroll').classList.remove('active');
+        const btn = document.getElementById('btnAutoScroll');
+        if (btn) {
+            btn.textContent = '开启';
+            btn.classList.remove('active');
+        }
         isAutoScrolling = false;
     }
 
-    document.getElementById('btnAutoScroll').addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (isAutoScrolling) {
-            stopAutoScroll();
-        } else {
-            startAutoScroll();
-        }
-    });
+    const btnAuto = document.getElementById('btnAutoScroll');
+    if (btnAuto) {
+        btnAuto.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (isAutoScrolling) {
+                stopAutoScroll();
+            } else {
+                startAutoScroll();
+            }
+        });
+    }
 
-    document.getElementById('scrollSpeed').addEventListener('input', function() {
-        const val = parseInt(this.value);
-        settings.scrollSpeed = val;
-        document.getElementById('scrollSpeedVal').textContent = val;
-        saveSettings(settings);
-        if (isAutoScrolling) {
-            startAutoScroll(); // 重启应用新速度
-        }
-    });
+    const scrollSp = document.getElementById('scrollSpeed');
+    if (scrollSp) {
+        scrollSp.addEventListener('input', function() {
+            if (!settings) return;
+            const val = parseInt(this.value);
+            settings.scrollSpeed = val;
+            const speedValEl = document.getElementById('scrollSpeedVal');
+            if (speedValEl) speedValEl.textContent = val;
+            saveSettings(settings);
+            if (isAutoScrolling) {
+                startAutoScroll();
+            }
+        });
+    }
 
     // 点击正文区域，立即暂停滚屏
-    document.getElementById('content').addEventListener('click', function() {
-        if (isAutoScrolling) stopAutoScroll();
-    });
+    const contentEl = document.getElementById('content');
+    if (contentEl) {
+        contentEl.addEventListener('click', function() {
+            if (isAutoScrolling) stopAutoScroll();
+        });
+    }
 
     // ── 全屏模式 ──
     function toggleFullscreen() {
@@ -554,30 +853,222 @@
         }
     }
     
-    document.getElementById('btnFullscreen').addEventListener('click', function(e) {
-        e.stopPropagation();
-        toggleFullscreen();
+    const btnFull = document.getElementById('btnFullscreen');
+    if (btnFull) {
+        btnFull.addEventListener('click', function(e) {
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+    }
+
+    // ── 左右翻页核心机制 ──
+    function getVisibleParagraphIdx() {
+        const content = document.getElementById('content');
+        if (!content) return 0;
+        const contentRect = content.getBoundingClientRect();
+        const paras = document.querySelectorAll('.reader-para');
+        
+        const isPaging = settings ? settings.pagingMode : false;
+        for (let p of paras) {
+            const rect = p.getBoundingClientRect();
+            if (isPaging) {
+                // 在多栏排版中，检查右边界是否进入可见区域
+                if (rect.right > contentRect.left + 15) {
+                    return parseInt(p.getAttribute('data-idx')) || 0;
+                }
+            } else {
+                // 滚动模式下，检查下边界是否进入可见区域
+                if (rect.bottom > 90) {
+                    return parseInt(p.getAttribute('data-idx')) || 0;
+                }
+            }
+        }
+        return 0;
+    }
+
+    function updatePagingInfo() {
+        if (!settings || !settings.pagingMode) return;
+        const content = document.getElementById('content');
+        if (!content) return;
+        const clientWidth = content.clientWidth;
+        const scrollWidth = content.scrollWidth;
+        
+        totalPages = Math.max(1, Math.ceil(scrollWidth / clientWidth));
+        currentPage = Math.max(0, Math.min(totalPages - 1, Math.round(content.scrollLeft / clientWidth)));
+        
+        const indicator = document.getElementById('pageIndicator');
+        if (indicator) {
+            indicator.textContent = `${currentPage + 1} / ${totalPages} 页`;
+        }
+        
+        // 翻页后，根据当前页面第一段，更新后台段落进度
+        const visibleIdx = getVisibleParagraphIdx();
+        updateProgress(visibleIdx);
+    }
+
+    function goToPage(pageIdx, smooth = true) {
+        if (!settings || !settings.pagingMode) return;
+        const content = document.getElementById('content');
+        if (!content) return;
+        const clientWidth = content.clientWidth;
+        currentPage = Math.max(0, Math.min(totalPages - 1, pageIdx));
+        
+        content.scrollTo({
+            left: currentPage * clientWidth,
+            behavior: smooth ? 'smooth' : 'auto'
+        });
+        
+        const indicator = document.getElementById('pageIndicator');
+        if (indicator) {
+            indicator.textContent = `${currentPage + 1} / ${totalPages} 页`;
+        }
+    }
+
+    function nextPage() {
+        if (currentPage < totalPages - 1) {
+            goToPage(currentPage + 1);
+        } else {
+            // 已到本章最末页，自动跳转下一章
+            const nextBtn = document.querySelector('.reader-nav a.btn-primary');
+            if (nextBtn) {
+                showLoading();
+                window.location.href = nextBtn.getAttribute('href');
+            } else {
+                showToast('已是最后一章');
+            }
+        }
+    }
+
+    function prevPage() {
+        if (currentPage > 0) {
+            goToPage(currentPage - 1);
+        } else {
+            // 已到本章第一页，自动跳转上一章并展示其最后一页
+            const prevBtn = document.querySelector('.reader-nav a.btn-secondary');
+            if (prevBtn) {
+                showLoading();
+                let href = prevBtn.getAttribute('href');
+                href += (href.indexOf('?') > -1 ? '&' : '?') + 'from=end';
+                window.location.href = href;
+            } else {
+                showToast('已经是第一章');
+            }
+        }
+    }
+
+    // 监听横向滚动与手势事件
+    if (contentEl) {
+        contentEl.addEventListener('scroll', function() {
+            if (!settings || !settings.pagingMode) return;
+            if (pageScrollTimeout) clearTimeout(pageScrollTimeout);
+            pageScrollTimeout = setTimeout(() => {
+                updatePagingInfo();
+            }, 150);
+        });
+
+        // 屏幕左右三分区点击手势
+        contentEl.addEventListener('click', function(e) {
+            if (!settings || !settings.pagingMode) return;
+            if (e.target.closest('a') || e.target.closest('button') || e.target.closest('select')) return;
+            
+            e.stopPropagation(); // 阻止事件冒泡到 document 触发关闭面板逻辑
+            
+            const rect = this.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const width = rect.width;
+            
+            if (clickX < width * 0.3) {
+                prevPage();
+            } else if (clickX > width * 0.7) {
+                nextPage();
+            } else {
+                // 点击中间激活设置面板
+                if (panel) panel.classList.toggle('open');
+            }
+        });
+
+        // 移动端左右滑动翻页手势
+        let touchStartX = 0;
+        let touchStartY = 0;
+        contentEl.addEventListener('touchstart', function(e) {
+            if (!settings || !settings.pagingMode) return;
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+        }, { passive: true });
+
+        contentEl.addEventListener('touchend', function(e) {
+            if (!settings || !settings.pagingMode) return;
+            const touchEndX = e.changedTouches[0].screenX;
+            const touchEndY = e.changedTouches[0].screenY;
+            
+            const diffX = touchEndX - touchStartX;
+            const diffY = touchEndY - touchStartY;
+            
+            if (Math.abs(diffX) > 60 && Math.abs(diffY) < 40) {
+                if (diffX > 0) {
+                    prevPage();
+                } else {
+                    nextPage();
+                }
+            }
+        }, { passive: true });
+    }
+
+    // 监听视口大小变化
+    window.addEventListener('resize', function() {
+        if (!settings || !settings.pagingMode) return;
+        const savedIdx = getVisibleParagraphIdx();
+        setTimeout(() => {
+            const content = document.getElementById('content');
+            if (content) {
+                const clientWidth = content.clientWidth;
+                totalPages = Math.max(1, Math.ceil(content.scrollWidth / clientWidth));
+                
+                const targetPara = document.querySelector(`.reader-para[data-idx="${savedIdx}"]`);
+                if (targetPara) {
+                    const rect = targetPara.getBoundingClientRect();
+                    const contentRect = content.getBoundingClientRect();
+                    const absoluteOffset = rect.left - contentRect.left + content.scrollLeft;
+                    const pageIdx = Math.floor(absoluteOffset / clientWidth);
+                    goToPage(pageIdx, false);
+                } else {
+                    updatePagingInfo();
+                }
+            }
+        }, 100);
     });
 
     // ── 键盘 A/D 或 左右方向键 翻页快捷键 ──
     document.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-        const src = '?source={{ source_id }}';
-        {% if chapter_idx > 0 %}
-        if (e.key === 'ArrowLeft' || e.key === 'a') {
-            showLoading();
-            window.location.href = '/read/{{ novel_url }}/{{ chapter_idx - 1 }}' + src;
-            return;
+        const isPaging = settings ? settings.pagingMode : false;
+        if (isPaging) {
+            if (e.key === 'ArrowLeft' || e.key === 'a') {
+                prevPage();
+                return;
+            }
+            if (e.key === 'ArrowRight' || e.key === 'd') {
+                nextPage();
+                return;
+            }
+        } else {
+            const src = '?source={{ source_id }}';
+            {% if chapter_idx > 0 %}
+            if (e.key === 'ArrowLeft' || e.key === 'a') {
+                showLoading();
+                window.location.href = '/read/{{ novel_url }}/{{ chapter_idx - 1 }}' + src;
+                return;
+            }
+            {% endif %}
+            {% if chapter_idx < total_chapters - 1 %}
+            if (e.key === 'ArrowRight' || e.key === 'd') {
+                showLoading();
+                window.location.href = '/read/{{ novel_url }}/{{ chapter_idx + 1 }}' + src;
+                return;
+            }
+            {% endif %}
         }
-        {% endif %}
-        {% if chapter_idx < total_chapters - 1 %}
-        if (e.key === 'ArrowRight' || e.key === 'd') {
-            showLoading();
-            window.location.href = '/read/{{ novel_url }}/{{ chapter_idx + 1 }}' + src;
-            return;
-        }
-        {% endif %}
     });
 
     // ── 段落级阅读进度记录与自动定位 ──
@@ -588,7 +1079,7 @@
 
     let currentParaIdx = LAST_PARA_IDX;
     let reportTimeout = null;
-    let isInitialScroll = LAST_PARA_IDX > 0;
+    let isInitialScroll = true;
 
     function sendProgressToServer(idx) {
         const bodyData = JSON.stringify({
@@ -629,7 +1120,7 @@
         
         reportTimeout = setTimeout(() => {
             sendProgressToServer(currentParaIdx);
-        }, 1500); // 1.5 seconds debounce
+        }, 1500);
     }
 
     // 监听页面隐藏/关闭，立即保存当前进度
@@ -648,12 +1139,13 @@
     if (paras.length > 0) {
         const observerOptions = {
             root: null,
-            // 视口检测区域：顶部导航栏高度(70px)以下到屏幕中上部
             rootMargin: '-90px 0px -70% 0px',
             threshold: 0
         };
 
         const observer = new IntersectionObserver((entries) => {
+            const isPaging = settings ? settings.pagingMode : false;
+            if (isPaging) return; // 翻页模式下使用 updatePagingInfo 统一更新进度
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     const idx = parseInt(entry.target.getAttribute('data-idx'));
@@ -667,21 +1159,57 @@
 
     // 页面载入时自动定位
     function restorePosition() {
-        if (LAST_PARA_IDX > 0) {
-            const targetPara = document.querySelector(`.reader-para[data-idx="${LAST_PARA_IDX}"]`);
-            if (targetPara) {
-                setTimeout(() => {
-                    targetPara.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    // 滚动完成后再启用进度监听
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromEnd = urlParams.get('from') === 'end';
+        
+        const isPaging = settings ? settings.pagingMode : false;
+        if (isPaging) {
+            setTimeout(() => {
+                const content = document.getElementById('content');
+                if (!content) return;
+                const clientWidth = content.clientWidth;
+                totalPages = Math.max(1, Math.ceil(content.scrollWidth / clientWidth));
+                
+                if (fromEnd) {
+                    goToPage(totalPages - 1, false);
+                    isInitialScroll = false;
+                } else if (LAST_PARA_IDX > 0) {
+                    const targetPara = document.querySelector(`.reader-para[data-idx="${LAST_PARA_IDX}"]`);
+                    if (targetPara) {
+                        const rect = targetPara.getBoundingClientRect();
+                        const contentRect = content.getBoundingClientRect();
+                        const pageIdx = Math.floor((rect.left - contentRect.left) / clientWidth);
+                        goToPage(pageIdx, false);
+                    }
                     setTimeout(() => {
                         isInitialScroll = false;
-                    }, 1000);
+                    }, 500);
+                } else {
+                    goToPage(0, false);
+                    isInitialScroll = false;
+                }
+            }, 200);
+        } else {
+            if (fromEnd) {
+                setTimeout(() => {
+                    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+                    isInitialScroll = false;
                 }, 100);
+            } else if (LAST_PARA_IDX > 0) {
+                const targetPara = document.querySelector(`.reader-para[data-idx="${LAST_PARA_IDX}"]`);
+                if (targetPara) {
+                    setTimeout(() => {
+                        targetPara.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        setTimeout(() => {
+                            isInitialScroll = false;
+                        }, 1000);
+                    }, 100);
+                } else {
+                    isInitialScroll = false;
+                }
             } else {
                 isInitialScroll = false;
             }
-        } else {
-            isInitialScroll = false;
         }
     }
 

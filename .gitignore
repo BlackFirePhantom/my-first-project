@@ -20,6 +20,9 @@ pip-log.txt
 /cache/
 /bookshelf.json
 
+# Scratch / debugging scripts (local only, never commit)
+/scratch/
+
 # Root HTML files (test output files)
 /*.html
 

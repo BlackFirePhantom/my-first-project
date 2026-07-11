@@ -19,12 +19,11 @@ URL 规律小结（实测归纳）：
 """
 
 import re
-import threading
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from novel_sources import cache, robust_get, robust_post
+from novel_sources import cache, robust_get, robust_post, prefetch_concurrent
 
 NAME = "00小说网"
 BASE_URL = "https://m.00shu.la"
@@ -253,12 +252,5 @@ def get_content(chapter_url: str) -> str:
 
 
 def prefetch(chapter_urls: list[str]):
-    """后台预读后续章节"""
-    def _do_prefetch():
-        for url in chapter_urls:
-            try:
-                get_content(url)
-            except Exception:
-                pass
-
-    threading.Thread(target=_do_prefetch, daemon=True).start()
+    """后台并发预读后续章节"""
+    prefetch_concurrent(get_content, chapter_urls)
